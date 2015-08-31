@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>377</width>
+    <height>244</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QComboBox" name="selectProject"/>
+    </item>
+    <item>
+     <widget class="QComboBox" name="selectEpi"/>
+    </item>
+    <item>
+     <widget class="QComboBox" name="selectSeq"/>
+    </item>
+    <item>
+     <widget class="QRadioButton" name="shot_check">
+      <property name="text">
+       <string>Shot</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QRadioButton" name="animatic_check">
+      <property name="text">
+       <string>Animatic</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QToolButton" name="addshot_button">
+      <property name="text">
+       <string>Add</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

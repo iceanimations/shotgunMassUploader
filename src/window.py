@@ -4,10 +4,6 @@ Created on Jul 11, 2015
 @author: iqra.idrees
 '''
 import sip
-from test.test_contains import seq
-from pip._vendor.colorama.ansi import Style
-from Tkconstants import SOLID
-from _ast import TryExcept
 from __builtin__ import True
 #from wsgiref.validate import check_input
 sip.setapi('QString', 2)
@@ -16,13 +12,12 @@ from PyQt4 import uic, QtCore
 from PyQt4.QtCore import Qt
 import sys
 import os
-from _ctypes import sizeof
 from shotgun_api3 import Shotgun
 import os.path as osp
 import hashlib
 import getpass
-from operator import itemgetter
-import time
+import re
+import traceback
 
 sys.path.insert(0, "R:\\Pipe_Repo\\Users\\Iqra\\modules")
 sys.path.append("R:\\Pipe_Repo\\Users\\Qurban\\utilities")
@@ -45,6 +40,7 @@ print rootPath
 uiPath = osp.join(rootPath, 'ui')
 filePath= osp.join(rootPath, 'files\project_file.txt')
 Form, Base = uic.loadUiType(osp.join(uiPath, 'main.ui'))
+
 
 
 
@@ -101,7 +97,7 @@ class MainWindow(Form, Base):
     def getShotName(self):
         return self.multiSelectDropDrown.getSelectedItems()
 
-    def user_input(self):
+    def process_user_input(self):
         self.table.upload_button.setEnabled(False)
         self.addshot_button.setEnabled(False)
         self.table.progress_label.setText("Please wait. Creating links...Processing...")
@@ -146,68 +142,88 @@ class MainWindow(Form, Base):
                     shot=self.create_shot(project,shot_name, seq) #create new shot
                     print "shot made"
 
+                shot_dirname = osp.join(self.getInitialPath(project_name),
+                        episode_name, 'SEQUENCES', seq['code'][-5:],
+                        'SHOTS', shot['code'][5:])
+                file_basename = shot['code'] + '.mov'
+                context_dirname = ''
+                version_code_postfix = ''
 
+                if shot_type == "Shot":
+                    file_basename = shot['code'][5:] + ".mov"
+                    context_dirname = osp.join('animation', 'preview')
+                    version_code_postfix = '_'.join(['animation', 'preview'])
 
-                #FILE DETAILS
-                if shot_type=="Shot": #shot details
+                elif shot_type == 'Animatic':
+                    file_basename = shot['code']+'_animatic.mov'
+                    context_dirname = 'animatic'
+                    version_code_postfix = 'animatic'
 
-                    shot_filename= shot['code'][5:] + ".mov"
-                    f_path=osp.join(self.getInitialPath(project_name), episode_name, "SEQUENCES", seq['code'][-5:], "SHOTS", shot['code'][5:], "animation", "preview", shot_filename) #shot path
-                    print "FPATH", f_path
+                version_filters = []
+                version_filters.append(('project', 'is', project))
+                version_filters.append(('entity', 'is', shot))
+                version_filters.append(('code', 'contains',
+                    version_code_postfix))
 
-                    if os.path.exists(f_path):
-                        shothash= self.create_hash(f_path)
-                        version= sg.find_one("Version",[['project', 'is', project], ['entity', 'is', shot]], ['id', 'code'] )
-                        if version and version['code'][-4:]=="V001":
-                            version=None
-                        print version
-                        if not version:
-                            print "Version not found"
-                            self.one_version = {'proj_id':project['id'], 'shot_code':shot['code'], 'shot_id':shot['id'], 'path':f_path, 'hash':shothash, 'type':"Shot"} #dictionary item
-                            self.data_list.append(self.one_version)
+                file_path = osp.join(shot_dirname, context_dirname,
+                        file_basename)
+                if not osp.exists(file_path):
+                    continue
+                file_hash = self.create_hash(file_path)
 
-                        else:
-                            print "version found"
-                            duplicate= sg.find_one("Version", [ ['entity','is',shot], ['sg_hash', 'is', shothash] ], [] )
-                            if not duplicate:
-                                self.versions.append({'id': version['id'], 'hash':shothash, 'path': f_path, 'shot_code': shot['code'], 'type': "Shot"})
+                all_versions = sg.find('Version', version_filters, ['code',
+                    'sg_hash', 'created_at'])
 
-                            else:
-                                self.table.MyTable.setItem(i , 5, QTableWidgetItem("Version already exists"))
-                                self.table.setColour(i, "red")
-                                QApplication.processEvents()
+                already_uploaded, max_version, version_number = False, None, 1
 
+                if all_versions:
+                    already_uploaded = any([version['sg_hash']==file_hash for version
+                        in all_versions])
+                    max_version = max(all_versions, key=self.get_version_number)
 
-                if shot_type=='Animatic': #animatic details
-                    animatic_filename= shot['code'] + "_animatic.mov"
-                    a_path= osp.join(self.getInitialPath(project_name), episode_name, "SEQUENCES", seq['code'][-5:], "SHOTS", shot['code'][5:], "animatic", animatic_filename) #animatic path
-                    print "a_path", a_path
+                if max_version:
+                    version_number = self.get_version_number(max_version) + 1
 
-                    if os.path.exists(a_path):
-                        anihash= self.create_hash(a_path)
-                        code= shot['code'] + "_V001"
-                        version= sg.find_one("Version",[['code','is',code], ['project', 'is', project], ['entity', 'is', shot]],['id'])
-                        if not version:
-                            print "Version not found"
-                            self.one_version = {'proj_id':project['id'], 'shot_code':shot['code'], 'shot_id':shot['id'], 'path':a_path, 'hash':anihash, 'type':"Animatic"} #dictionary item
-                            self.data_list.append(self.one_version)
+                if version_number <= 0:
+                    version_number = 1
+                version_string = 'V%03d'%version_number 
 
-                        else:
-                            print "version found"
-                            duplicate= sg.find_one("Version", [ ['entity','is',shot], ['sg_hash', 'is', anihash] ], [] )
+                if already_uploaded:
+                    self.table.MyTable.setItem(i , 5, QTableWidgetItem("Version already exists"))
+                    self.table.setColour(i, "red")
+                    QApplication.processEvents()
+                else:
+                    # Queue for uploading
+                    new_version = {
+                            'proj_id': project['id'],
+                            'shot_code': shot['code'],
+                            'shot_id': shot['id'],
+                            'path': file_path,
+                            'hash': file_hash,
+                            'type': shot_type,
+                            'max_version': max_version,
+                            'version_code': '_'.join([shot['code'],
+                                version_code_postfix, version_string])
+                            }
+                    self.data_list.append(new_version)
 
-                            if not duplicate:
-                                self.versions.append({'id': version['id'], 'hash':anihash, 'path': a_path, 'shot_code': shot['code'], 'type': "Animatic"})
-
-                            else:
-                                print "Duplicate found"
-                                self.table.MyTable.setItem(i , 5, QTableWidgetItem("Version already exists"))
-                                self.table.setColour(i, "red")
-                                QApplication.processEvents()
             self.create_versions()
         except Exception as ex:
-            self.showMessage(msg=str(ex), icon=QMessageBox.Warning)
+            msg = str(ex)
+            msg += '\n'
+            msg += traceback.format_exc()
+            self.showMessage(msg=msg, icon=QMessageBox.Warning)
 
+    versionNumPattern = re.compile(r'.*[vV](\d+)$')
+    def get_version_number(self, item, pattern=versionNumPattern):
+        if not isinstance(pattern, type(self.versionNumPattern)):
+            pattern = re.compile(pattern)
+        if isinstance(item, dict):
+            item = item['code']
+        match = self.versionNumPattern.match(item)
+        if match:
+            return int(match.group(1))
+        return -1
 
     def create_hash(self, path):
         with open(path, 'rb') as f:
@@ -223,13 +239,8 @@ class MainWindow(Form, Base):
             all_data= self.data_list
             for item in all_data:
 
-
                 last_version_number= self.get_latest_version(item) +1
                 #print"latest",  last_version_number
-
-
-                item['version_code']= item['shot_code'] + "_V00" + str(last_version_number)
-
 
                 data = {
                     'project': {'type':'Project', 'id':item['proj_id']},
@@ -293,8 +304,6 @@ class MainWindow(Form, Base):
             self.addshot_button.setEnabled(True)
             QApplication.processEvents()
 
-
-
     def create_episode(self, project, episode_name):
         data = {
         'project': {'type':'Project','id':project['id']},
@@ -304,7 +313,6 @@ class MainWindow(Form, Base):
 
         epi = sg.create("CustomEntity01", data)
         return epi #get epi id of the new episode
-
 
     def create_sequence(self, project, episode, seq_name):
 
@@ -715,7 +723,7 @@ class WorkThread(QtCore.QThread):
     def run(self):
         #time.sleep(5) # artificial time delay
 
-        self.parentWin.user_input()
+        self.parentWin.process_user_input()
         #self.emit(QtCore.SIGNAL('update(QString)'), "Upload done ")
         #self.parentWin.create_versions()
 

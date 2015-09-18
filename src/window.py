@@ -29,7 +29,7 @@ SCRIPT_NAME = 'TestScript'
 SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
 #PROXY = '10.10.0.212:8080'
 PROXY = 'iqra.idrees:padela123@10.10.2.124:8080'
-PROXY= None
+#PROXY= None
 sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
 user= getpass.getuser()
 artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])

@@ -403,8 +403,8 @@ class MainWindow(Form, Base):
         if os.path.exists(self.path):
             episodes= os.listdir(self.path)
             for i in range(0, len(episodes)):
-                if episodes[i][:2]=="EP": #display only episode folders
-                    self.selectEpi.addItem(episodes[i])
+                if episodes[i][:2].upper()=="EP": #display only episode folders
+                    self.selectEpi.addItem(episodes[i].upper())
 
         else:
             QMessageBox.question(self, 'Warning',  'Could not find Project',QMessageBox.Ok)

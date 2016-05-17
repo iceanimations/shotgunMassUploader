@@ -29,19 +29,16 @@ SCRIPT_NAME = 'TestScript'
 SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
 #PROXY = '10.10.0.212:8080'
 PROXY = 'iqra.idrees:padela123@10.10.2.124:8080'
-#PROXY= None
+PROXY= None
 sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
 user= getpass.getuser()
 artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
 
 
 rootPath = osp.dirname(osp.dirname(__file__))
-print rootPath
 uiPath = osp.join(rootPath, 'ui')
 filePath= osp.join(rootPath, 'files\project_file.txt')
 Form, Base = uic.loadUiType(osp.join(uiPath, 'main.ui'))
-
-
 
 
 class MainWindow(Form, Base):
@@ -52,7 +49,7 @@ class MainWindow(Form, Base):
         self.setupUi(self)
         self.data_list = [] #list of dictionaries to store create version entry stuff
         self.versions=[] #list of dictionaries to store all the upload stuff
-        self.path= ""
+        self.path = ""
         self.current_proj=0
         self.table = Table(self)
         self.table.setWindowTitle("My Table")
@@ -70,7 +67,6 @@ class MainWindow(Form, Base):
         self.selectProject.activated[str].connect(self.ProjActivated) #filling episodes DD
         self.selectEpi.activated[str].connect(self.EpiActivated) #filling sequences DD
         self.selectSeq.activated[str].connect(self.SeqActivated) #filling shots DD
-        #self.multiSelectDropDrown.button.mousePressEvent = lambda event: self.ShotActivated()
         self.addshot_button.clicked.connect(self.AddShotActivated) #saving selected shot info to data_list (list)
 
     def showMessage(self, **kwargs):
@@ -80,12 +76,13 @@ class MainWindow(Form, Base):
         return self.selectProject.currentText()
 
     def getInitialPath(self, p_name):
-        all_projects= open(filePath).readlines()
+        with open(filePath) as f:
+            all_projects = f.readlines()
 
         #print all_projects
         for i in range(0, len(all_projects)):
             split=all_projects[i].split("=")
-            while split[0].rstrip('\n')==p_name:
+            if split[0].rstrip('\n')==p_name:
                 return split[1].rstrip('\n')
 
     def getEpName(self):
@@ -94,8 +91,12 @@ class MainWindow(Form, Base):
     def getSeqName(self):
         return self.selectSeq.currentText()
 
-    def getShotName(self):
-        return self.multiSelectDropDrown.getSelectedItems()
+    def getShotNames(self):
+        shots = self.multiSelectDropDrown.getSelectedItems()
+        if shots and shots[0] == 'All':
+            return self.multiSelectDropDrown.getItems()[1:]
+        else:
+            return shots
 
     def process_user_input(self):
         self.table.upload_button.setEnabled(False)
@@ -149,8 +150,8 @@ class MainWindow(Form, Base):
                 context_dirname = ''
                 version_code_postfix = ''
 
-                if shot_type == "Shot":
-                    file_basename = shot['code'][5:] + ".mov"
+                if shot_type == "Preview":
+                    file_basename = shot['code'] + ".mov"
                     context_dirname = osp.join('animation', 'preview')
                     version_code_postfix = '_'.join(['animation', 'preview'])
 
@@ -203,8 +204,7 @@ class MainWindow(Form, Base):
                             'type': shot_type,
                             'max_version': max_version,
                             'version_code': '_'.join([shot['code'],
-                                version_code_postfix, version_string])
-                            }
+                                version_code_postfix, version_string]) }
                     self.data_list.append(new_version)
 
             self.create_versions()
@@ -234,75 +234,75 @@ class MainWindow(Form, Base):
 
     def create_versions(self):
 
-            self.table.progress_label.setText("")
-            batch_data=[]
-            all_data= self.data_list
-            for item in all_data:
+        self.table.progress_label.setText("")
+        batch_data=[]
+        all_data= self.data_list
+        for item in all_data:
 
-                last_version_number= self.get_latest_version(item) +1
-                #print"latest",  last_version_number
+            last_version_number= self.get_latest_version(item) +1
+            #print"latest",  last_version_number
 
-                data = {
-                    'project': {'type':'Project', 'id':item['proj_id']},
-                    'code': item['version_code'],
-                    'entity': {'type':'Shot', 'id': item['shot_id']},
-                    'user': artist,
-                    'created_by': artist
-                }
+            data = {
+                'project': {'type':'Project', 'id':item['proj_id']},
+                'code': item['version_code'],
+                'entity': {'type':'Shot', 'id': item['shot_id']},
+                'user': artist,
+                'created_by': artist
+            }
 
-                batch_data.append({"request_type":"create","entity_type":"Version","data":data} )
+            batch_data.append({"request_type":"create","entity_type":"Version","data":data} )
 
-            print "BATCH DATA:", batch_data
+        print "BATCH DATA:", batch_data
 
-            created_versions= sg.batch(batch_data) #creating all versions in a batch
+        created_versions= sg.batch(batch_data) #creating all versions in a batch
 
-            for ver, data in zip(created_versions, all_data):
-                one_upload= { 'id': ver['id'], 'hash': data['hash'], 'path': data['path'], 'shot_code': data['shot_code'], 'type': data['type'] }
-                self.versions.append(one_upload)
+        for ver, data in zip(created_versions, all_data):
+            one_upload= { 'id': ver['id'], 'hash': data['hash'], 'path': data['path'], 'shot_code': data['shot_code'], 'type': data['type'] }
+            self.versions.append(one_upload)
 
-            print "versions to be uploaded:", self.versions
-
-
-            total=str(len(self.versions))
-            count = 2
-            intial_prog = "1 of " + total + " uploading "
-            self.table.progress_label.setText(intial_prog)
-            self.data_list=[] #empty the data list
-
-            #uploading part
-            for ver in self.versions:
-                print "uploading", ver
-                if sg.upload('Version', ver['id'], ver['path'],'sg_uploaded_movie'): #upload new version shot/animatic using new vid
-                    c= str(count)
-                    my_progress= c + " of " + total +  " uploading..."
-                    self.table.progress_label.setText(my_progress)
-                    sg.update("Version", ver['id'],{'sg_hash': ver['hash']} )
-
-                    rows= self.table.MyTable.findItems(ver['shot_code'], Qt.MatchExactly)
-                    x=0
-                    if len(rows)==1:
-                        x= self.table.MyTable.row(rows[0])
-                    else:
-                        for r in range(0, len(rows)):
-                                c_row= self.table.MyTable.row(rows[r])
-                                if self.table.MyTable.item(c_row, 4).text()== ver['type']:
-                                    x= c_row
-                                    break
+        print "versions to be uploaded:", self.versions
 
 
-                    self.table.MyTable.setItem(x , 5, QTableWidgetItem("Uploaded!"))
-                    self.table.setColour(x, "green")
-                    QApplication.processEvents()
+        total=str(len(self.versions))
+        count = 2
+        intial_prog = "1 of " + total + " uploading "
+        self.table.progress_label.setText(intial_prog)
+        self.data_list=[] #empty the data list
 
-                    print "Upload done"
-                    count= count + 1
+        #uploading part
+        for ver in self.versions:
+            print "uploading", ver
+            if sg.upload('Version', ver['id'], ver['path'],'sg_uploaded_movie'): #upload new version shot/animatic using new vid
+                c= str(count)
+                my_progress= c + " of " + total +  " uploading..."
+                self.table.progress_label.setText(my_progress)
+                sg.update("Version", ver['id'],{'sg_hash': ver['hash']} )
 
-            self.versions=[] #empty uploading list
-            p= total + " of " + total +  " uploaded!"
-            self.table.progress_label.setText(p)
-            self.table.upload_button.setEnabled(True)
-            self.addshot_button.setEnabled(True)
-            QApplication.processEvents()
+                rows= self.table.MyTable.findItems(ver['shot_code'], Qt.MatchExactly)
+                x=0
+                if len(rows)==1:
+                    x= self.table.MyTable.row(rows[0])
+                else:
+                    for r in range(0, len(rows)):
+                            c_row= self.table.MyTable.row(rows[r])
+                            if self.table.MyTable.item(c_row, 4).text()== ver['type']:
+                                x= c_row
+                                break
+
+
+                self.table.MyTable.setItem(x , 5, QTableWidgetItem("Uploaded!"))
+                self.table.setColour(x, "green")
+                QApplication.processEvents()
+
+                print "Upload done"
+                count= count + 1
+
+        self.versions=[] #empty uploading list
+        p= total + " of " + total +  " uploaded!"
+        self.table.progress_label.setText(p)
+        self.table.upload_button.setEnabled(True)
+        self.addshot_button.setEnabled(True)
+        QApplication.processEvents()
 
     def create_episode(self, project, episode_name):
         data = {
@@ -339,7 +339,6 @@ class MainWindow(Form, Base):
         data = {
         'project': {'type':'Project','id':project['id']},
         'code': shot_name,
-        'description': 'Shot blah',
         'sg_sequence': {'type':'Sequence','id':seq['id']},
         }
 
@@ -349,7 +348,7 @@ class MainWindow(Form, Base):
     def getAllShots(self, s_name):
         s_name= s_name[5:]
 
-        path= "P:\\external\\Captain_Khalfan\\02_production\\EP01\\SEQUENCES" + "\\" + s_name + "\\SHOTS"
+        path = os.path.join(self.getSequencePath(), 'SHOTS')
         all_files= os.listdir(path)
         all_shots= []
 
@@ -363,19 +362,20 @@ class MainWindow(Form, Base):
         #SHOT
         if item['type']== "Shot":
             #latest version = latest date and largest id number
-            summaries = sg.summarize(entity_type='Version', filters = [['project', 'is', {'type':'Project', 'id':item['proj_id']}], ['entity', 'is', {'type':'Shot', 'id':item['shot_id']}]],summary_fields=[{'field':'created_at', 'type':'latest'}, {'field':'id', 'type':'maximum'}])
+            summaries = sg.summarize(entity_type='Version', filters=[
+                ['project', 'is', {'type':'Project', 'id':item['proj_id']}],
+                ['entity', 'is', {'type':'Shot', 'id':item['shot_id']}] ],
+                summary_fields=[{'field':'created_at', 'type':'latest'},
+                    {'field':'id', 'type':'maximum'}])
 
             if summaries['summaries']['id']!=0:
 
                 fields = ['code']
                 filters = [
                     ['project','is',{'type':'Project','id':item['proj_id']}],
-                    ['id','is',summaries['summaries']['id']]
-                    ]
+                    ['id','is',summaries['summaries']['id']] ]
 
                 last_version_number= sg.find_one("Version",filters,fields)['code'][-3:] #finding latest version number
-                #print "version:",last_version_number
-                print "last version number",last_version_number
                 return int(last_version_number)
 
             else:
@@ -385,10 +385,35 @@ class MainWindow(Form, Base):
         else:
             return 0
 
+    def getProjectPath(self):
+        projName = self.getProjectName()
+        if projName == '--Select Project--':
+            raise Exception, 'No project Selected'
+        return os.path.join( self.getInitialPath(self.getProjectName()) )
+
+
+    def getEpisodePath(self):
+        epName = self.getEpName()
+        if epName == '--Select Episode--':
+            raise Exception, 'No Episode Selected'
+        if epName == 'No Episode' :
+            return self.getProjectPath()
+        else:
+            return os.path.join(self.getProjectPath(), epName)
+
+    def getSequencePath(self):
+        seqname = self.getSeqName()
+        if seqname == "--Select Sequence--":
+            raise Exception, 'No sequence selected'
+        return os.path.join(self.getEpisodePath(), 'SEQUENCES', seqname)
+
+    def getShotPath(self, shotName):
+        if shotName == "--Select Shot--":
+            raise Exception, 'No Shot selected'
+        return os.path.join(self.getSequencePath(), 'SHOTS', shotName )
 
     def ProjActivated(self):
-
-        self.path=self.getInitialPath(self.getProjectName())
+        self.path=self.getProjectPath()
 
         #when new project is selected everything else should be cleared
         self.selectEpi.clear()
@@ -397,38 +422,26 @@ class MainWindow(Form, Base):
         self.selectSeq.clear()
         self.multiSelectDropDrown.clearItems()
 
+        projPath = self.getProjectPath()
 
-        print "path", self.path
-
-        if os.path.exists(self.path):
-            episodes= os.listdir(self.path)
-            for i in range(0, len(episodes)):
-                if episodes[i][:2].upper()=="EP": #display only episode folders
-                    self.selectEpi.addItem(episodes[i].upper())
+        if os.path.exists(projPath):
+            for episode in os.listdir(projPath):
+                #display only episode folders
+                if episode[:2].upper()=="EP":
+                    self.selectEpi.addItem(episode.upper())
 
         else:
-            QMessageBox.question(self, 'Warning',  'Could not find Project',QMessageBox.Ok)
-
+            QMessageBox.question(self, 'Warning',  'Could not find Project', QMessageBox.Ok)
 
     def EpiActivated(self, text): #Epi DD triggered
-
         self.path= self.getInitialPath(self.getProjectName())
-
         self.selectSeq.clear()
         self.multiSelectDropDrown.clearItems()
 
 
         if self.check_input()==True:
-
             self.selectSeq.addItem("--Select Sequence--")
-
-            if self.getEpName()!= "No Episode":
-                self.path= osp.join(self.path, self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES")
-
-
-            else:
-                self.path= self.getInitialPath(self.getProjectName()) + "\\SEQUENCES"
-
+            self.path= os.path.join( self.getEpisodePath(), "SEQUENCES" )
             sequences = os.listdir(self.path)
 
             #filling DD
@@ -438,170 +451,71 @@ class MainWindow(Form, Base):
 
 
     def SeqActivated(self, text): #Seq DD triggered
-
-        if self.getEpName()!= "No Episode":
-            self.path = self.getInitialPath(self.getProjectName())+ "\\" + self.getEpName() + "\\SEQUENCES\\"  #get current path
-        else:
-            self.path= self.getInitialPath(self.getProjectName()) + "\\SEQUENCES\\"
-
+        self.path = os.path.join(self.getEpisodePath(), 'SEQUENCES')
         self.multiSelectDropDrown.clearItems()
-
-
         if self.check_input()==True:
-
-            self.path = self.path + "\\" + self.getSeqName() + "\\SHOTS"  #get current path
+            self.path = os.path.join(self.getSequencePath(), 'SHOTS')
             shots = os.listdir(self.path)
-
             #filling DD
             self.multiSelectDropDrown.addItems(["All"], selected=[])
             for i in range(0, len(shots)):
                 if shots[i][:2]=='SQ':
                     self.multiSelectDropDrown.addItems([shots[i]], selected=[])
 
-        else:
-            return
+    def getPreviewPath(self, shot):
+        shotPath = self.getShotPath(shot)
+        return os.path.join(shotPath, 'animation', 'preview', self.getEpName()
+                + '_' + shot + '.mov')
 
-
+    def getAnimaticPath(self, shot):
+        shotPath = self.getShotPath(shot)
+        return os.path.join(shotPath, 'animatic', self.getEpName() + '_' + shot
+                + '_animatic.mov')
 
     def AddShotActivated(self):
+        if ( self.animatic_check.isChecked()==False and
+                self.shot_check.isChecked()==False  ):
+            QMessageBox.question(self, 'Warning', '''Please select a Shot or
+                    Animatic''',QMessageBox.Ok)
 
-        if self.check_input()==False:
-            print "BAD INPUT"
+        if not self.check_input():
+            return
+        if not self.table:
+            self.table = Table(self)
+        self.table.show()
 
-        else:
+        shots = self.getShotNames()
 
-            self.table.show()
+        for shot in shots:
 
-            if self.getEpName()!= "No Episode":
-                shots= self.multiSelectDropDrown.getSelectedItems()
-                if shots== []:
-                    QMessageBox.question(self, 'Warning', '''Please select a Shot''',QMessageBox.Ok)
+            if self.animatic_check.isChecked():
+                clip_type = 'Animatic'
+                clip_path = self.getAnimaticPath(shot)
+            elif self.shot_check.isChecked():
+                clip_type = 'Preview'
+                clip_path = self.getPreviewPath(shot)
 
-                else:
-                    #SHOT
-                    if self.shot_check.isChecked():
-                        if shots[0]!= "All":
-                            for i in range(0, len(shots)):
-                                f_path=osp.join(self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animation", "preview", shots[i] + ".mov")
-                                self.table.setData(self.getProjectName(), self.getEpName(), self.getEpName() + "_"+ self.getSeqName(), self.getEpName() + "_" + shots[i], "Shot", "") #adding the select shot to the UI table
-                                if not os.path.exists(f_path):
-                                     self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                     self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-                                QApplication.processEvents()
+            if self.shot_check.isChecked():
+                #adding the file to the UI table
+                self.table.setData( self.getProjectName(),
+                        self.getEpName(),
+                        self.getEpName() + "_"+ self.getSeqName(),
+                        self.getEpName() + "_" + shot, clip_type, "")
+                if not os.path.exists(clip_path):
+                    self.table.MyTable.setItem(self.table.MyTable.rowCount()-1
+                            , 5, QTableWidgetItem("File not found"))
+                    self.table.setColour(self.table.MyTable.rowCount()-1,
+                            "red")
+                QApplication.processEvents()
 
-                        else:
-                            p1= os.path.join(self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES", self.getSeqName(), "SHOTS")
-                            shots= os.listdir(p1)
-                            for i in range(0, len(shots)):
-                                if shots[i][:2]=="SQ":
-                                    f_path=osp.join(self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animation", "preview", shots[i] + ".mov")
-                                    f_path=os.path.normpath(f_path)
-                                    self.table.setData(self.getProjectName(), self.getEpName(), self.getEpName() + "_"+ self.getSeqName(), self.getEpName() + "_"+ shots[i], "Shot", "")
-                                    if not os.path.exists(f_path):
-                                        self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                        self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-                                    QApplication.processEvents()
-
-                    #ANIMATIC
-                    if self.animatic_check.isChecked():
-                        if shots[0]!= "All":
-                            for i in range(0, len(shots)):
-                                if shots[i][:2]=="SQ":
-                                    a_path= osp.join(self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animatic", self.getEpName()+ "_" + shots[i] + "_animatic.mov")
-                                    self.table.setData(self.getProjectName(), self.getEpName(), self.getEpName() + "_"+ self.getSeqName(), self.getEpName() + "_"+ shots[i], "Animatic", "")
-                                    if not os.path.exists(a_path):
-                                        self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                        self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-
-                                    QApplication.processEvents()
-
-                        else:
-                            p1= os.path.join(self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES", self.getSeqName(), "SHOTS")
-                            shots= os.listdir(p1)
-                            for i in range(0, len(shots)):
-                                if shots[i][:2]=="SQ":
-                                    a_path= osp.join(self.getInitialPath(self.getProjectName()), self.getEpName(), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animatic", self.getEpName()+ "_"+ shots[i] + "_animatic.mov")
-                                    self.table.setData(self.getProjectName(), self.getEpName(), self.getEpName() + "_" + self.getSeqName(), self.getEpName() + "_"+ shots[i], "Animatic", "")
-                                    if not os.path.exists(a_path):
-                                        self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                        self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-                                    QApplication.processEvents()
-
-                    if self.animatic_check.isChecked()==False and self.shot_check.isChecked()==False :
-                        QMessageBox.question(self, 'Warning', '''Please select a Shot or Animatic''',QMessageBox.Ok)
-
-         #NO EPISODE SELECTED
-            else:
-                shots= self.multiSelectDropDrown.getSelectedItems()
-
-                if shots== []:
-                    QMessageBox.question(self, 'Warning', '''Please select a Shot''',QMessageBox.Ok)
-
-                else:
-
-                    #SHOT
-                    if self.shot_check.isChecked():
-                        if shots[0]!= "All":
-                            for i in range(0, len(shots)):
-                                f_path=osp.join(self.getInitialPath(self.getProjectName()), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animation", "preview", shots[i] + ".mov")
-                                print f_path
-                                self.table.setData(self.getProjectName(), "No Episode", self.getSeqName(), shots[i], "Shot", "") #adding the select shot to the UI table
-                                if not os.path.exists(f_path):
-                                    self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                    self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-                            QApplication.processEvents()
-
-
-                        else:
-                            p1= os.path.join(self.getInitialPath(self.getProjectName()), "SEQUENCES", self.getSeqName(), "SHOTS")
-                            shots= os.listdir(p1)
-                            for i in range(0, len(shots)):
-                                if shots[i][:2]=="SQ":
-                                    f_path=  f_path=osp.join(self.getInitialPath(self.getProjectName()), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animation", "preview", shots[i] + ".mov")
-                                    print f_path
-                                    self.table.setData(self.getProjectName(), "No Episode", self.getSeqName(), shots[i], "Shot", "")
-                                    if not os.path.exists(f_path):
-                                        self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                        self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-                            QApplication.processEvents()
-
-
-
-                    #ANIMATIC
-                    if self.animatic_check.isChecked():
-                        if shots[0]!= "All":
-                            for i in range(0, len(shots)):
-                                a_path= osp.join(self.getInitialPath(self.getProjectName()), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animatic", self.getSeqName()+ "_" + shots[i] + "_animatic.mov")
-                                if shots[i][:2]=="SQ":
-                                    self.table.setData(self.getProjectName(), "No Episode", self.getSeqName(), shots[i], "Animatic", "")
-                                if not os.path.exists(a_path):
-                                        self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                        self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-
-                        else:
-                            p1= os.path.join(self.getInitialPath(self.getProjectName()), "SEQUENCES", self.getSeqName(), "SHOTS")
-                            shots= os.listdir(p1)
-                            for i in range(0, len(shots)):
-                                a_path= osp.join(self.getInitialPath(self.getProjectName()), "SEQUENCES", self.getSeqName(), "SHOTS", shots[i], "animatic", self.getSeqName()+ "_" + shots[i] + "_animatic.mov")
-                                if shots[i][:2]=="SQ":
-                                    self.table.setData(self.getProjectName(), "No Episode", self.getSeqName(), shots[i], "Animatic", "")
-                                if not os.path.exists(a_path):
-                                        self.table.MyTable.setItem(self.table.MyTable.rowCount()-1 , 5, QTableWidgetItem("File not found"))
-                                        self.table.setColour(self.table.MyTable.rowCount()-1, "red")
-
-                    if self.animatic_check.isChecked()==False and self.shot_check.isChecked()==False :
-                        QMessageBox.question(self, 'Warning', '''Please select a Shot or Animatic''',QMessageBox.Ok)
 
     def check_input(self): #validating correct input
-
-        if self.getProjectName()== "--Select Project--" or self.getEpName()=="--Select Episode--" or self.getSeqName()== "--Select Sequence--":
-            QMessageBox.question(self, 'Error!', '''Please select a valid file''',QMessageBox.Ok)
+        if ( self.getProjectName() == "--Select Project--" or
+                self.getEpName() == "--Select Episode--" or
+                self.getSeqName() == "--Select Sequence--" ):
+            # QMessageBox.question(self, 'Error!', '''Please select a valid file''',QMessageBox.Ok)
             return False
-
-        else:
-            return True
-
-
+        return True
 
 
 Form2, Base2=uic.loadUiType(osp.join(uiPath, 'table.ui'))
@@ -615,6 +529,7 @@ class Table(Form2, Base2):
         self.upload_button.clicked.connect(self.upload)
 
         self.parentWin = parent
+        self.workThread = WorkThread(self.parentWin)
 
         self.label.setText(user)
         self.refresh_button.clicked.connect(self.refresh_clicked)
@@ -632,7 +547,6 @@ class Table(Form2, Base2):
         self.MyTable.setItem(rowPosition , 3, QTableWidgetItem(sh_name))
         self.MyTable.setItem(rowPosition , 4, QTableWidgetItem(sh_file))
         self.MyTable.setItem(rowPosition , 5, QTableWidgetItem(comments))
-        self.workThread = WorkThread(self.parentWin)
 
     def refresh_clicked(self):
         print "refresh"
@@ -710,22 +624,16 @@ class Table(Form2, Base2):
         self.parentWin.versions=[]
 
 
-
 class WorkThread(QtCore.QThread):
     def __init__(self, p):
         QtCore.QThread.__init__(self)
         self.parentWin = p
 
-
     def __del__(self):
         self.wait()
 
     def run(self):
-        #time.sleep(5) # artificial time delay
-
         self.parentWin.process_user_input()
-        #self.emit(QtCore.SIGNAL('update(QString)'), "Upload done ")
-        #self.parentWin.create_versions()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

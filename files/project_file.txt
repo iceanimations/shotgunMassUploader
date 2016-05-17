@@ -2,3 +2,4 @@ Captain_Khalfan=P:\external\Captain_Khalfan\02_production
 Ding_Dong=L:\RED\Ding_Dong\production
 Test=P:\external\Captain_Khalfan\02_production
 Mansour-S02=P:\external\Al_Mansour_Season_02\02_production
+Mansour S03=P:\external\Al_Mansour_Season_03\02_production

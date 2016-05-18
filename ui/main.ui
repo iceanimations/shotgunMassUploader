@@ -25,16 +25,23 @@
      <widget class="QComboBox" name="selectSeq"/>
     </item>
     <item>
-     <widget class="QRadioButton" name="shot_check">
+     <widget class="QRadioButton" name="animatic_check">
       <property name="text">
-       <string>Shot</string>
+       <string>Animatic</string>
       </property>
      </widget>
     </item>
     <item>
-     <widget class="QRadioButton" name="animatic_check">
+     <widget class="QRadioButton" name="shot_check">
       <property name="text">
-       <string>Animatic</string>
+       <string>Animation</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QRadioButton" name="comp_check">
+      <property name="text">
+       <string>Comp</string>
       </property>
      </widget>
     </item>

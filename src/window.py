@@ -36,20 +36,130 @@ artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
 
 
 rootPath = osp.dirname(osp.dirname(__file__))
-uiPath = osp.join(rootPath, 'ui')
 filePath= osp.join(rootPath, 'files\project_file.txt')
+class PathResolver(object):
+    ''' All the local Paths are resolved in this class '''
+    project = None
+    episode = None
+    sequence = None
+    shot = None
+
+    def __init__(self, project=None, episode=None, sequence=None, shot=None):
+        self.project = project
+        self.episode = episode
+        self.sequence = sequence
+        self.shot = shot
+
+    @property
+    def _initialPath(self):
+        p_name = self.project
+        with open(filePath) as f:
+            all_projects = f.readlines()
+        #print all_projects
+        for i in range(0, len(all_projects)):
+            split=all_projects[i].split("=")
+            if split[0].rstrip('\n')==p_name:
+                return split[1].rstrip('\n')
+
+    @property
+    def projectPath(self):
+        projName = self.project
+        if projName is None:
+            raise Exception, 'No project specified'
+        return self._initialPath
+
+    @property
+    def episodePath(self):
+        epName = self.episode
+        if epName is None:
+            raise Exception, 'No Episode specified'
+        if epName == 'No Episode' :
+            return self.projectPath
+        else:
+            return os.path.join(self.projectPath, epName)
+
+    @property
+    def sequencePath(self):
+        seqname = self.sequence
+        if seqname is None:
+            raise Exception, 'No sequence specified'
+        return os.path.join(self.episodePath, 'SEQUENCES', seqname)
+
+    @property
+    def shotPath(self):
+        shotName = self.shot
+        if shotName is None:
+            raise Exception, 'No Shot specified'
+        return os.path.join(self.sequencePath, 'SHOTS', shotName )
+
+    @property
+    def animationPath(self):
+        return os.path.join(self.shotPath, 'animation', 'preview',
+                self.episode + '_' + self.shot + '.mov')
+
+    @property
+    def animaticPath(self):
+        return os.path.join(self.shotPath, 'animatic', self.episode + '_' +
+                self.shot + '_animatic.mov')
+
+    @property
+    def compPath(self):
+        return os.path.join(self.shotPath, 'comp', 'preview', self.episode
+                + '_' + self.shot + '.mov')
+
+    episode_re = re.compile(r'^ep\d+', re.I)
+    @property
+    def episodes(self):
+        basePath = self.projectPath
+        if os.path.exists(basePath):
+            return [name.upper() for name in os.listdir(basePath) if
+                    os.path.isdir(os.path.join(basePath, name)) and
+                        self.episode_re.match(name)]
+        return None
+
+    sequence_re = re.compile(r'^sq\d+', re.I)
+    @property
+    def sequences(self):
+        basePath = os.path.join(self.episodePath, 'SEQUENCES')
+        if os.path.exists(basePath):
+            return [name.upper() for name in os.listdir(basePath) if
+                    os.path.isdir(os.path.join(basePath, name)) and
+                        self.sequence_re.match(name)]
+        return []
+
+    shot_re = re.compile('^sq\d+_sh\d+', re.I)
+    @property
+    def shots(self):
+        basePath = os.path.join(self.sequencePath, 'SHOTS')
+        if os.path.exists(basePath):
+            return [name.upper() for name in os.listdir(basePath) if
+                    os.path.isdir(os.path.join(basePath, name)) and
+                        self.shot_re.match(name)]
+        return None
+
+def create_hash(path, blocksize=2**20):
+    m = hashlib.md5()
+    with open( path , "rb" ) as f:
+        while True:
+            buf = f.read(blocksize)
+            if not buf:
+                break
+            m.update( buf )
+    return m.hexdigest()
+
+uiPath = osp.join(rootPath, 'ui')
 Form, Base = uic.loadUiType(osp.join(uiPath, 'main.ui'))
-
-
 class MainWindow(Form, Base):
+    defaultProject = '--Select Project--'
+    defaultEpisode = '--Select Episode--'
+    defaultSequence = '--Select Sequence--'
 
     def __init__(self, parent=None):
-
         super(MainWindow, self).__init__(parent)
         self.setupUi(self)
         self.data_list = [] #list of dictionaries to store create version entry stuff
         self.versions=[] #list of dictionaries to store all the upload stuff
-        self.path = ""
+        self.paths = PathResolver()
         self.current_proj=0
         self.table = Table(self)
         self.table.setWindowTitle("My Table")
@@ -75,23 +185,13 @@ class MainWindow(Form, Base):
     def getProjectName(self):
         return self.selectProject.currentText()
 
-    def getInitialPath(self, p_name):
-        with open(filePath) as f:
-            all_projects = f.readlines()
-
-        #print all_projects
-        for i in range(0, len(all_projects)):
-            split=all_projects[i].split("=")
-            if split[0].rstrip('\n')==p_name:
-                return split[1].rstrip('\n')
-
     def getEpName(self):
         return self.selectEpi.currentText()
 
     def getSeqName(self):
         return self.selectSeq.currentText()
 
-    def getShotNames(self):
+    def getSelectedShotNames(self):
         shots = self.multiSelectDropDrown.getSelectedItems()
         if shots and shots[0] == 'All':
             return self.multiSelectDropDrown.getItems()[1:]
@@ -136,29 +236,31 @@ class MainWindow(Form, Base):
                     seq= self.create_sequence(project, episode, seq_name)
                     print "seq made"
 
-
                 #SHOT DETAILS
                 shot= sg.find_one("Shot",[['code','is',shot_name], ['project', 'is', project], ['sg_sequence', 'is', seq]],['id', 'code'])
                 if not shot:
                     shot=self.create_shot(project,shot_name, seq) #create new shot
                     print "shot made"
 
-                shot_dirname = osp.join(self.getInitialPath(project_name),
-                        episode_name, 'SEQUENCES', seq['code'][-5:],
-                        'SHOTS', shot['code'][5:])
-                file_basename = shot['code'] + '.mov'
-                context_dirname = ''
                 version_code_postfix = ''
 
-                if shot_type == "Preview":
-                    file_basename = shot['code'] + ".mov"
-                    context_dirname = osp.join('animation', 'preview')
+                print seq_name.split('_')[1:]
+
+                paths = PathResolver(project_name, episode_name,
+                        '_'.join( seq_name.split('_')[1:] ),
+                        '_'.join( shot_name.split('_')[1:] ))
+
+                if shot_type == "Animation":
                     version_code_postfix = '_'.join(['animation', 'preview'])
+                    file_path = paths.animationPath
 
                 elif shot_type == 'Animatic':
-                    file_basename = shot['code']+'_animatic.mov'
-                    context_dirname = 'animatic'
                     version_code_postfix = 'animatic'
+                    file_path = paths.animaticPath
+
+                elif shot_type == 'Comp':
+                    version_code_postfix = '_'.join(['comp', 'preview'])
+                    file_path = paths.compPath
 
                 version_filters = []
                 version_filters.append(('project', 'is', project))
@@ -166,11 +268,9 @@ class MainWindow(Form, Base):
                 version_filters.append(('code', 'contains',
                     version_code_postfix))
 
-                file_path = osp.join(shot_dirname, context_dirname,
-                        file_basename)
                 if not osp.exists(file_path):
                     continue
-                file_hash = self.create_hash(file_path)
+                file_hash = create_hash(file_path)
 
                 all_versions = sg.find('Version', version_filters, ['code',
                     'sg_hash', 'created_at'])
@@ -225,15 +325,7 @@ class MainWindow(Form, Base):
             return int(match.group(1))
         return -1
 
-    def create_hash(self, path):
-        with open(path, 'rb') as f:
-            data = f.read()
-            md5 = hashlib.md5()
-            md5.update(data)
-            return md5.hexdigest()
-
     def create_versions(self):
-
         self.table.progress_label.setText("")
         batch_data=[]
         all_data= self.data_list
@@ -315,7 +407,6 @@ class MainWindow(Form, Base):
         return epi #get epi id of the new episode
 
     def create_sequence(self, project, episode, seq_name):
-
         if self.getEpName()!='No Episode':
 
             data = {
@@ -345,20 +436,7 @@ class MainWindow(Form, Base):
         shot = sg.create("Shot", data)
         return shot #get new shot
 
-    def getAllShots(self, s_name):
-        s_name= s_name[5:]
-
-        path = os.path.join(self.getSequencePath(), 'SHOTS')
-        all_files= os.listdir(path)
-        all_shots= []
-
-        for i in range (0 , len(all_files)):
-            if all_files[i][:5]== s_name:
-                all_shots.append(all_files[i])
-        return all_shots
-
     def get_latest_version(self, item):
-
         #SHOT
         if item['type']== "Shot":
             #latest version = latest date and largest id number
@@ -385,98 +463,49 @@ class MainWindow(Form, Base):
         else:
             return 0
 
-    def getProjectPath(self):
-        projName = self.getProjectName()
-        if projName == '--Select Project--':
-            raise Exception, 'No project Selected'
-        return os.path.join( self.getInitialPath(self.getProjectName()) )
-
-
-    def getEpisodePath(self):
-        epName = self.getEpName()
-        if epName == '--Select Episode--':
-            raise Exception, 'No Episode Selected'
-        if epName == 'No Episode' :
-            return self.getProjectPath()
-        else:
-            return os.path.join(self.getProjectPath(), epName)
-
-    def getSequencePath(self):
-        seqname = self.getSeqName()
-        if seqname == "--Select Sequence--":
-            raise Exception, 'No sequence selected'
-        return os.path.join(self.getEpisodePath(), 'SEQUENCES', seqname)
-
-    def getShotPath(self, shotName):
-        if shotName == "--Select Shot--":
-            raise Exception, 'No Shot selected'
-        return os.path.join(self.getSequencePath(), 'SHOTS', shotName )
-
     def ProjActivated(self):
-        self.path=self.getProjectPath()
-
         #when new project is selected everything else should be cleared
         self.selectEpi.clear()
-        self.selectEpi.addItem("--Select Episode--")
+        self.selectEpi.addItem(self.defaultEpisode)
         self.selectEpi.addItem("No Episode")
         self.selectSeq.clear()
         self.multiSelectDropDrown.clearItems()
 
-        projPath = self.getProjectPath()
+        projName = self.getProjectName()
+        if projName == self.defaultProject:
+            return
 
-        if os.path.exists(projPath):
-            for episode in os.listdir(projPath):
-                #display only episode folders
-                if episode[:2].upper()=="EP":
-                    self.selectEpi.addItem(episode.upper())
-
-        else:
-            QMessageBox.question(self, 'Warning',  'Could not find Project', QMessageBox.Ok)
+        self.paths.project = projName
+        for ep in self.paths.episodes:
+            self.selectEpi.addItem(ep)
 
     def EpiActivated(self, text): #Epi DD triggered
-        self.path= self.getInitialPath(self.getProjectName())
         self.selectSeq.clear()
         self.multiSelectDropDrown.clearItems()
-
-
-        if self.check_input()==True:
-            self.selectSeq.addItem("--Select Sequence--")
-            self.path= os.path.join( self.getEpisodePath(), "SEQUENCES" )
-            sequences = os.listdir(self.path)
-
-            #filling DD
-            for i in range(0, len(sequences)):
-                if sequences[i][:2]=='SQ':
-                    self.selectSeq.addItem(sequences[i])
-
+        epName = self.getEpName()
+        if epName == self.defaultEpisode:
+            return
+        self.paths.episode = epName
+        self.selectSeq.addItem(self.defaultSequence)
+        for seq in self.paths.sequences:
+            self.selectSeq.addItem(seq)
 
     def SeqActivated(self, text): #Seq DD triggered
-        self.path = os.path.join(self.getEpisodePath(), 'SEQUENCES')
         self.multiSelectDropDrown.clearItems()
-        if self.check_input()==True:
-            self.path = os.path.join(self.getSequencePath(), 'SHOTS')
-            shots = os.listdir(self.path)
-            #filling DD
-            self.multiSelectDropDrown.addItems(["All"], selected=[])
-            for i in range(0, len(shots)):
-                if shots[i][:2]=='SQ':
-                    self.multiSelectDropDrown.addItems([shots[i]], selected=[])
+        seqName = self.getSeqName()
+        if seqName == self.defaultSequence:
+            return
 
-    def getPreviewPath(self, shot):
-        shotPath = self.getShotPath(shot)
-        return os.path.join(shotPath, 'animation', 'preview', self.getEpName()
-                + '_' + shot + '.mov')
-
-    def getAnimaticPath(self, shot):
-        shotPath = self.getShotPath(shot)
-        return os.path.join(shotPath, 'animatic', self.getEpName() + '_' + shot
-                + '_animatic.mov')
+        self.paths.sequence = self.getSeqName()
+        self.multiSelectDropDrown.addItems(["All"], selected=[])
+        for shot in self.paths.shots:
+            self.multiSelectDropDrown.addItems([shot], selected=[])
 
     def AddShotActivated(self):
-        if ( self.animatic_check.isChecked()==False and
-                self.shot_check.isChecked()==False  ):
-            QMessageBox.question(self, 'Warning', '''Please select a Shot or
-                    Animatic''',QMessageBox.Ok)
+        if not (self.animatic_check.isChecked() or self.shot_check.isChecked()
+                or self.comp_check.isChecked() ):
+            QMessageBox.question(self, 'Warning',
+                    '''Please select a Shot or Animatic''', QMessageBox.Ok)
 
         if not self.check_input():
             return
@@ -484,43 +513,41 @@ class MainWindow(Form, Base):
             self.table = Table(self)
         self.table.show()
 
-        shots = self.getShotNames()
+        shots = self.getSelectedShotNames()
 
         for shot in shots:
+            self.paths.shot = shot
 
             if self.animatic_check.isChecked():
                 clip_type = 'Animatic'
-                clip_path = self.getAnimaticPath(shot)
+                clip_path = self.paths.animaticPath
             elif self.shot_check.isChecked():
-                clip_type = 'Preview'
-                clip_path = self.getPreviewPath(shot)
+                clip_type = 'Animation'
+                clip_path = self.paths.animationPath
+            elif self.comp_check.isChecked():
+                clip_type = 'Comp'
+                clip_path = self.paths.compPath
 
-            if self.shot_check.isChecked():
-                #adding the file to the UI table
-                self.table.setData( self.getProjectName(),
-                        self.getEpName(),
-                        self.getEpName() + "_"+ self.getSeqName(),
-                        self.getEpName() + "_" + shot, clip_type, "")
-                if not os.path.exists(clip_path):
-                    self.table.MyTable.setItem(self.table.MyTable.rowCount()-1
-                            , 5, QTableWidgetItem("File not found"))
-                    self.table.setColour(self.table.MyTable.rowCount()-1,
-                            "red")
-                QApplication.processEvents()
-
+            self.table.setData( self.getProjectName(),
+                    self.getEpName(),
+                    self.getEpName() + "_"+ self.getSeqName(),
+                    self.getEpName() + "_" + shot, clip_type, "")
+            if not os.path.exists(clip_path):
+                self.table.MyTable.setItem(self.table.MyTable.rowCount()-1
+                        , 5, QTableWidgetItem("File not found"))
+                self.table.setColour(self.table.MyTable.rowCount()-1,
+                        "red")
+            QApplication.processEvents()
 
     def check_input(self): #validating correct input
-        if ( self.getProjectName() == "--Select Project--" or
-                self.getEpName() == "--Select Episode--" or
-                self.getSeqName() == "--Select Sequence--" ):
-            # QMessageBox.question(self, 'Error!', '''Please select a valid file''',QMessageBox.Ok)
+        if ( self.getProjectName() == self.defaultProject and
+                self.getEpName() == self.defaultEpisode and
+                self.getSeqName() == self.defaultSequence):
             return False
         return True
 
-
 Form2, Base2=uic.loadUiType(osp.join(uiPath, 'table.ui'))
 class Table(Form2, Base2):
-
     def __init__(self, parent=None):
 
         super(Table, self).__init__()
@@ -609,10 +636,8 @@ class Table(Form2, Base2):
         current_row= self.MyTable.currentRow()
         self.MyTable.removeRow(current_row)
 
-
     def upload(self):
         self.workThread.start()
-
 
     def closeEvent(self, event):
         self.clear_all()
@@ -622,7 +647,6 @@ class Table(Form2, Base2):
         self.progress_label.setText("")
         self.parentWin.data_list= []
         self.parentWin.versions=[]
-
 
 class WorkThread(QtCore.QThread):
     def __init__(self, p):

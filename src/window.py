@@ -7,9 +7,9 @@ import sip
 from __builtin__ import True
 #from wsgiref.validate import check_input
 sip.setapi('QString', 2)
-from PyQt4.QtGui import QApplication, QTableWidget, QTableWidgetItem, QMessageBox
+from PyQt4.QtGui import QApplication, QTableWidgetItem, QMessageBox
 from PyQt4 import uic, QtCore
-from PyQt4.QtCore import Qt
+from PyQt4.QtCore import Qt, pyqtSignal
 import sys
 import os
 from shotgun_api3 import Shotgun
@@ -18,6 +18,7 @@ import hashlib
 import getpass
 import re
 import traceback
+import time
 
 sys.path.insert(0, "R:\\Pipe_Repo\\Users\\Iqra\\modules")
 sys.path.append("R:\\Pipe_Repo\\Users\\Qurban\\utilities")
@@ -27,18 +28,18 @@ import msgBox
 SERVER_PATH = 'https://iceanimations.shotgunstudio.com'
 SCRIPT_NAME = 'TestScript'
 SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
-#PROXY = '10.10.0.212:8080'
-PROXY = 'iqra.idrees:padela123@10.10.2.124:8080'
 PROXY= None
+
 sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
 user= getpass.getuser()
 artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
 
-
 rootPath = osp.dirname(osp.dirname(__file__))
 filePath= osp.join(rootPath, 'files\project_file.txt')
+uiPath = osp.join(rootPath, 'ui')
+
 class PathResolver(object):
-    ''' All the local Paths are resolved in this class '''
+    ''' All the local paths are resolved in this class '''
     project = None
     episode = None
     sequence = None
@@ -147,12 +148,14 @@ def create_hash(path, blocksize=2**20):
             m.update( buf )
     return m.hexdigest()
 
-uiPath = osp.join(rootPath, 'ui')
 Form, Base = uic.loadUiType(osp.join(uiPath, 'main.ui'))
 class MainWindow(Form, Base):
     defaultProject = '--Select Project--'
     defaultEpisode = '--Select Episode--'
     defaultSequence = '--Select Sequence--'
+
+    _mainThreadId = QtCore.QThread.currentThreadId()
+    _mutex = QtCore.QMutex()
 
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
@@ -163,7 +166,7 @@ class MainWindow(Form, Base):
         self.current_proj=0
         self.table = Table(self)
         self.table.setWindowTitle("My Table")
-        self.thread= WorkThread(self) #upload thread
+        self.thread= ProcessThread(self) #upload thread
         self.multiSelectDropDrown = cui.MultiSelectComboBox(self)
         self.verticalLayout.insertWidget(3, self.multiSelectDropDrown, )
 
@@ -178,6 +181,10 @@ class MainWindow(Form, Base):
         self.selectEpi.activated[str].connect(self.EpiActivated) #filling sequences DD
         self.selectSeq.activated[str].connect(self.SeqActivated) #filling shots DD
         self.addshot_button.clicked.connect(self.AddShotActivated) #saving selected shot info to data_list (list)
+
+        self.progressLabelUpdate.connect(self.updateProgressLabel)
+        self.tableItemStatusUpdate.connect(self.updateTableItemStatus)
+
 
     def showMessage(self, **kwargs):
         return msgBox.showMessage(self, 'SG Mass Uploader', **kwargs)
@@ -198,11 +205,27 @@ class MainWindow(Form, Base):
         else:
             return shots
 
+    def process_queue(self):
+        self.table.upload_button.setEnabled(False)
+        self.progressLabelUpdate.emit('Processing Items ... ')
+        self.processEvents()
+
+        while 1:
+            self._mutex.lock()
+            data = self.table.getNextRowData()
+            if not data:
+                self._mutex.unlock()
+                time.sleep(1)
+            else:
+                self.tableItemStatusUpdate.emit(data[0], 'Processing ... ',
+                        'yellow')
+
+
     def process_user_input(self):
         self.table.upload_button.setEnabled(False)
         self.addshot_button.setEnabled(False)
-        self.table.progress_label.setText("Please wait. Creating links...Processing...")
-        QApplication.processEvents()
+        self.progressLabelUpdate.emit('Processing and Creating Links ... ')
+        self.processEvents()
 
         rows= self.table.MyTable.rowCount()
         try:
@@ -244,11 +267,7 @@ class MainWindow(Form, Base):
 
                 version_code_postfix = ''
 
-                print seq_name.split('_')[1:]
-
-                paths = PathResolver(project_name, episode_name,
-                        '_'.join( seq_name.split('_')[1:] ),
-                        '_'.join( shot_name.split('_')[1:] ))
+                paths = self.table.paths(i)
 
                 if shot_type == "Animation":
                     version_code_postfix = '_'.join(['animation', 'preview'])
@@ -327,6 +346,7 @@ class MainWindow(Form, Base):
 
     def create_versions(self):
         self.table.progress_label.setText("")
+        self.progressLabelUpdate.emit()
         batch_data=[]
         all_data= self.data_list
         for item in all_data:
@@ -354,7 +374,6 @@ class MainWindow(Form, Base):
 
         print "versions to be uploaded:", self.versions
 
-
         total=str(len(self.versions))
         count = 2
         intial_prog = "1 of " + total + " uploading "
@@ -381,10 +400,8 @@ class MainWindow(Form, Base):
                                 x= c_row
                                 break
 
-
-                self.table.MyTable.setItem(x , 5, QTableWidgetItem("Uploaded!"))
-                self.table.setColour(x, "green")
-                QApplication.processEvents()
+                self.tableItemStatusUpdate.emit(x, 'Uploaded!', 'green')
+                self.processEvents()
 
                 print "Upload done"
                 count= count + 1
@@ -548,24 +565,43 @@ class MainWindow(Form, Base):
 
 Form2, Base2=uic.loadUiType(osp.join(uiPath, 'table.ui'))
 class Table(Form2, Base2):
-    def __init__(self, parent=None):
+    '''The upload queue viewer'''
+    progressLabelUpdate = pyqtSignal(str)
+    tableItemStatusUpdate = pyqtSignal(int, str, str)
 
+    def __init__(self, parent=None):
         super(Table, self).__init__()
         self.setupUi(self)
         self.delete_button.clicked.connect(self.delete)
         self.upload_button.clicked.connect(self.upload)
 
         self.parentWin = parent
-        self.workThread = WorkThread(self.parentWin)
+        self.processThreads = []
 
         self.label.setText(user)
         self.refresh_button.clicked.connect(self.refresh_clicked)
         self.clear_button.clicked.connect(self.clear_all)
 
+        self.rowStatus = []
+        self._mutex = QtCore.QMutex()
+        self._mainThreadId = QtCore.QThread.currentThreadId()
 
+    def isMainThread(self):
+        return QtCore.QThread.currentThreadId() == self._mainThreadId
+
+    def processEvents(self):
+        if self.isMainThread():
+            QApplication.processEvents()
+
+    def updateProgressLabel(self, text):
+        self.progress_label.setText(text)
+
+    def updateTableItemStatus(self, idx, msg, colour):
+        self.MyTable.setItem(idx, 5, QTableWidgetItem(msg))
+        if colour:
+            self.table.setColour(idx, colour)
 
     def setData(self, p_name, e_name, seq_name, sh_name, sh_file, comments):
-
         rowPosition = self.MyTable.rowCount()
         self.MyTable.insertRow(rowPosition)
         self.MyTable.setItem(rowPosition , 0, QTableWidgetItem(p_name))
@@ -574,6 +610,148 @@ class Table(Form2, Base2):
         self.MyTable.setItem(rowPosition , 3, QTableWidgetItem(sh_name))
         self.MyTable.setItem(rowPosition , 4, QTableWidgetItem(sh_file))
         self.MyTable.setItem(rowPosition , 5, QTableWidgetItem(comments))
+        self.rowStatus.append('Waiting')
+
+    def getNextRow(self):
+        for rowIndex in self.MyTable.rowCount():
+            if ( self.rowStatus[rowIndex] == 'Waiting'):
+                return rowIndex, [self.MyTable.item(rowIndex, c).text() for c in
+                        range(6)]
+        for rowIndex in self.MyTable.rowCount():
+            if ( self.rowStatus[rowIndex] == 'Failed' ):
+                return rowIndex, [self.MyTable.item(rowIndex, c).text() for c in
+                        range(6)]
+        return -1, []
+
+    def process_queue(self):
+        self.upload_button.setEnabled(False)
+        self.progressLabelUpdate.emit('Processing Items ... ')
+        self.processEvents()
+        conn = Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
+
+        while 1:
+            self._mutex.lock()
+            index, data = self.getNextRow()
+            if not data:
+                self._mutex.unlock()
+                time.sleep(1)
+            else:
+                self.rowStatus[index] = 'Processing'
+                self._mutex.unlock()
+                self.tableItemStatusUpdate.emit(index, 'Processing ... ',
+                        'yellow')
+                self.processEvents()
+            if self.process_row(index, data, conn):
+                self.rowStatus[index] = 'Done'
+
+
+    def process_row(self, idx, data, conn=None):
+        if conn is None:
+            conn = sg
+
+        project_name = data[0]
+        episode_name = data[1]
+        seq_name = data[2]
+        shot_name = data[3]
+        shot_type = data[4]
+
+        paths = self.paths(idx)
+        version_code_postfix = ''
+
+        if shot_type == "Animation":
+            version_code_postfix = '_'.join(['animation', 'preview'])
+            file_path = paths.animationPath
+
+        elif shot_type == 'Animatic':
+            version_code_postfix = 'animatic'
+            file_path = paths.animaticPath
+
+        elif shot_type == 'Comp':
+            version_code_postfix = '_'.join(['comp', 'preview'])
+            file_path = paths.compPath
+
+        if not os.path.exists(file_path):
+            self.tableItemStatusUpdate(idx, 'File Not Found', 'red')
+            self.rowStatus['Failed']
+            return False
+
+        self.updateTableItemStatus.emit(idx, 'Linking ...', 'yellow')
+        project = conn.find_one("Project",[['name','is',project_name]],['id', 'name'])
+
+        #EPI DETAILS
+        if episode_name!="No Episode":
+            episode = conn.find_one("CustomEntity01",[['code','is',episode_name], ['project', 'is', project]],['id', 'code'])
+            if not episode:
+                episode=self.create_episode(project, episode_name)
+        else:
+            episode= []
+
+        #SEQ DETAILS
+        seq = conn.find_one("Sequence",[['code','is',seq_name],['project', 'is', project]],['id', 'code'])
+        if not seq:
+            seq= self.create_sequence(project, episode, seq_name)
+
+        #SHOT DETAILS
+        shot = conn.find_one("Shot",[['code','is',shot_name], ['project', 'is', project], ['sg_sequence', 'is', seq]],['id', 'code'])
+        if not shot:
+            shot=self.create_shot(project,shot_name, seq) #create new shot
+
+        version = None
+
+        version_filters = []
+        version_filters.append(('project', 'is', project))
+        version_filters.append(('entity', 'is', shot))
+        version_filters.append(('code', 'contains',
+            version_code_postfix))
+
+        if not osp.exists(file_path):
+            continue
+        file_hash = create_hash(file_path)
+
+        all_versions = conn.find('Version', version_filters, ['code',
+            'sg_hash', 'created_at'])
+
+        already_uploaded, max_version, version_number = False, None, 1
+
+        if all_versions:
+            already_uploaded = any([ver['sg_hash']==file_hash for ver
+                in all_versions])
+            max_version = max(all_versions, key=self.get_version_number)
+
+        if max_version:
+            version_number = self.get_version_number(max_version) + 1
+
+        if version_number <= 0:
+            version_number = 1
+        version_string = 'V%03d'%version_number 
+
+        if already_uploaded:
+            self.updateTableItemStatus.emit(idx, 'Version already exists!', 'green')
+            QApplication.processEvents()
+            return True
+
+        version_data = {
+            'project': {'type':'Project', 'id':project['id']},
+            'code': '_'.join([shot['code'], version_code_postfix, version_string]),
+            'entity': {'type':'Shot', 'id': shot['id']},
+            'user': artist,
+            'created_by': artist
+        }
+
+        version = conn.create('Version', data=version_data)
+        try:
+            self.updateTableItemStatus.emit(idx, 'Uploading ...', 'yellow')
+            QApplication.processEvents()
+            sg.upload('Version', version['id'], file_path, 'sg_uploaded_movie')
+            self.updateTableItemStatus.emit(idx, 'Uploaded!', 'green')
+            QApplication.processEvents()
+        except Exception as e:
+            self.updateTableItemStatus.emit(idx, 'Error: %s'%str(e), 'red')
+            conn.delete('Version', version['id'])
+            QApplication.processEvents()
+            self.rowStatus[idx] = 'Failed'
+
+        return True
 
     def refresh_clicked(self):
         print "refresh"
@@ -601,7 +779,6 @@ class Table(Form2, Base2):
                     self.setColour(i, "red")
                     QApplication.processEvents()
 
-
             if shot_type=='Animatic': #animatic details
                 animatic_filename= shot_name + "_animatic.mov"
                 print "a_name", animatic_filename
@@ -618,19 +795,19 @@ class Table(Form2, Base2):
                     self.setColour(i, "red")
                     QApplication.processEvents()
 
-
     def setColour(self, rowPos, mycolour):
         if mycolour=="red":
-            for i in range(0, 6):
-                self.MyTable.item(rowPos, i).setBackground(Qt.red)
-
+            mycolour = Qt.red
         if mycolour=="green":
-            for i in range(0, 6):
-                self.MyTable.item(rowPos, i).setBackground(Qt.green)
-
-        if mycolour=="white":
-            for i in range(0, 6):
-                self.MyTable.item(rowPos, i).setBackground(Qt.white)
+            mycolour = Qt.green
+        if mycolour=="blue":
+            mycolour = Qt.blue
+        if mycolour=="yellow":
+            mycolour = Qt.yellow
+        else:
+            mycolour = Qt.white
+        for i in range(6):
+            self.MyTable.item(rowPos, i).setBackground(mycolour)
 
     def delete(self):
         current_row= self.MyTable.currentRow()
@@ -648,7 +825,16 @@ class Table(Form2, Base2):
         self.parentWin.data_list= []
         self.parentWin.versions=[]
 
-class WorkThread(QtCore.QThread):
+    def paths(self, i):
+        project_name= self.table.MyTable.item(i, 0).text()
+        episode_name= self.table.MyTable.item(i, 1).text()
+        seq_name= self.table.MyTable.item(i, 2).text()
+        shot_name= self.table.MyTable.item(i, 3).text()
+        return PathResolver(project_name, episode_name,
+                '_'.join( seq_name.split('_')[1:] ),
+                '_'.join( shot_name.split('_')[1:] ))
+
+class ProcessThread(QtCore.QThread):
     def __init__(self, p):
         QtCore.QThread.__init__(self)
         self.parentWin = p

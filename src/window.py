@@ -283,8 +283,11 @@ class MainWindow(Form, Base):
 Form2, Base2=uic.loadUiType(osp.join(uiPath, 'table.ui'))
 class UploadQueueTable(Form2, Base2):
     '''The upload queue manager '''
-    progressUpdate = pyqtSignal(str)
-    tableItemStatusUpdate = pyqtSignal(int, str, str)
+    _updateProgressLabel = pyqtSignal(str)
+    _updateTableItemStatus = pyqtSignal(int, str, str)
+    _completed = pyqtSignal()
+
+    _num_threads = 4
 
     class RowStatus:
         kWaiting = 0
@@ -311,16 +314,11 @@ class UploadQueueTable(Form2, Base2):
         self._mainThreadId = QtCore.QThread.currentThreadId()
 
         self._stop = False
+        self._hide = False
 
-        self.progressUpdate.connect(self.updateProgressLabel)
-        self.tableItemStatusUpdate.connect(self.updateTableItemStatus)
-
-    def isMainThread(self):
-        return QtCore.QThread.currentThreadId() == self._mainThreadId
-
-    def processEvents(self):
-        if self.isMainThread():
-            QApplication.processEvents()
+        self._updateProgressLabel.connect(self.updateProgressLabel)
+        self._updateTableItemStatus.connect(self.updateTableItemStatus)
+        self._completed.connect(self.completed)
 
     def updateProgressLabel(self, text):
         self.progress_label.setText(text)
@@ -343,6 +341,22 @@ class UploadQueueTable(Form2, Base2):
         self.itemStatus.append(self.RowStatus.kWaiting)
         self._mutex.unlock()
 
+    def progressUpdate(self, text):
+        self._updateProgressLabel.emit(text)
+
+    def itemUpdate(self, idx, msg, color):
+        self._updateTableItemStatus.emit(idx, msg, color)
+
+    def allDone(self):
+        self._completed.emit()
+
+    def isMainThread(self):
+        return QtCore.QThread.currentThreadId() == self._mainThreadId
+
+    def processEvents(self):
+        if self.isMainThread():
+            QApplication.processEvents()
+
     def getNextRow(self):
         if self._stop:
             return -1, []
@@ -359,14 +373,14 @@ class UploadQueueTable(Form2, Base2):
     def progress(self):
         nRows = self.MyTable.rowCount()
         return len( [ True for rowIndex in range(nRows) if
-            self.itemStatus[rowIndex] == self.RowStatus.kDone ] ), nRows
+            self.itemStatus[rowIndex] == self.RowStatus.kDone ] ), len(
+                    [ True for rowIndex in range(nRows) if
+            self.itemStatus[rowIndex] == self.RowStatus.kBusy]), nRows
 
     def process_queue(self):
         conn = Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
 
         while 1:
-            if self._stop:
-                break
             self._mutex.lock()
             index, data = self.getNextRow()
             if not data:
@@ -375,14 +389,25 @@ class UploadQueueTable(Form2, Base2):
             else:
                 self.itemStatus[index] = self.RowStatus.kBusy
                 self._mutex.unlock()
-                self.tableItemStatusUpdate.emit(index, 'Processing ... ',
-                        'yellow')
+                self.itemUpdate(index, 'Processing ... ', 'yellow')
                 self.processEvents()
                 if self.process_row(index, data, conn):
                     self.itemStatus[index] = self.RowStatus.kDone
                 else:
                     self.itemStatus[index] = self.RowStatus.kFailed
-                self.progressUpdate.emit('%d of %d Completed! ... '%self.progress())
+
+                done, busy, count = self.progress()
+                if done == count:
+                    self.progressUpdate('All Done!')
+                    self.allDone()
+                elif busy:
+                    self.progressUpdate(
+                            '%d of %d Completed!, %d in progress ... '%( done,
+                                count, busy))
+                else:
+                    self.progressUpdate(
+                            '%d of %d Completed!, Stopped!'%( done, count))
+                    self.allDone()
 
     def process_row(self, idx, data, conn=None):
         if conn is None:
@@ -410,10 +435,10 @@ class UploadQueueTable(Form2, Base2):
             file_path = paths.compPath
 
         if not os.path.exists(file_path):
-            self.tableItemStatusUpdate.emit(idx, 'File Not Found', 'red')
+            self.itemUpdate(idx, 'File Not Found', 'red')
             return False
 
-        self.tableItemStatusUpdate.emit(idx, 'Linking ...', 'yellow')
+        self.itemUpdate(idx, 'Linking ...', 'yellow')
         project = conn.find_one("Project",[['name','is',project_name]],['id', 'name'])
 
         #EPI DETAILS
@@ -461,7 +486,7 @@ class UploadQueueTable(Form2, Base2):
         version_string = 'V%03d'%version_number 
 
         if already_uploaded:
-            self.tableItemStatusUpdate.emit(idx, 'Version already exists!', 'green')
+            self.itemUpdate(idx, 'Version already exists!', 'green')
             QApplication.processEvents()
             return True
 
@@ -474,15 +499,15 @@ class UploadQueueTable(Form2, Base2):
         }
 
         try:
-            self.tableItemStatusUpdate.emit(idx, 'Uploading ...', 'yellow')
+            self.itemUpdate(idx, 'Uploading ...', 'yellow')
             QApplication.processEvents()
             version = conn.create('Version', data=version_data)
             conn.upload('Version', version['id'], file_path, 'sg_uploaded_movie')
             sg.update("Version", version['id'], {'sg_hash': file_hash} )
-            self.tableItemStatusUpdate.emit(idx, 'Uploaded!', 'green')
+            self.itemUpdate(idx, 'Uploaded!', 'green')
             self.processEvents()
         except Exception as e:
-            self.tableItemStatusUpdate.emit(idx, 'Error: %s'%str(e), 'red')
+            self.itemUpdate(idx, 'Error: %s'%str(e), 'red')
             self.processEvents()
             if version:
                 conn.delete('Version', version['id'])
@@ -567,9 +592,8 @@ class UploadQueueTable(Form2, Base2):
                     file_path = paths.compPath
                 if os.path.exists(file_path):
                     self.itemStatus[rowIndex] = self.RowStatus.kWaiting
-                    self.tableItemStatusUpdate.emit(rowIndex, '', 'white')
+                    self.itemUpdate(rowIndex, '', 'white')
                     self.processEvents()
-
         return True
 
     def setColour(self, rowPos, mycolour):
@@ -587,56 +611,69 @@ class UploadQueueTable(Form2, Base2):
         self.processEvents()
 
     def stop(self):
-        self._stop = True
-        self.progressUpdate.emit('Stopping Upload ...')
+        self.progressUpdate('Stopping Upload ...')
         self.processEvents()
+        self._stop = True
 
-        result = cui.showMessage(self, title='Stop Upload',
-                msg = 'Process interrupted by user',
-                ques = 'Do you want to terminate on going uploads immediately?',
-                icon = QMessageBox.Question,
-                btns=QMessageBox.Yes | QMessageBox.No)
-        if result == QMessageBox.Yes:
-            for thread in self.workThreads:
-                try:
-                    thread.terminate()
-                except:
-                    pass
-            self.workThreads = []
-        for idx in range( self.MyTable.rowCount() ):
-            if self.itemStatus[idx] == self.RowStatus.kBusy:
-                self.itemStatus[idx] = self.RowStatus.kFailed
-                self.tableItemStatusUpdate.emit(idx, 'Stopped', 'red')
+        if self.isWorking():
+            result = cui.showMessage(self, title='Stop Upload',
+                    msg = 'Process interrupted by user',
+                    ques = 'Do you want to terminate ongoing uploads immediately?',
+                    icon = QMessageBox.Question,
+                    btns=QMessageBox.Yes | QMessageBox.No)
+            if result == QMessageBox.Yes:
+                for thread in self.workThreads:
+                    try:
+                        thread.terminate()
+                    except:
+                        pass
+                self.workThreads = []
+                for idx in range( self.MyTable.rowCount() ):
+                    if self.itemStatus[idx] == self.RowStatus.kBusy:
+                        self.itemStatus[idx] = self.RowStatus.kFailed
+                        self.itemUpdate(idx, 'Stopped', 'red')
+                self.progressUpdate('Upload Stopped!')
+                self.allDone()
+                self.clear_button.setEnabled(True)
+                self.delete_button.setEnabled(True)
         self.upload_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        self.clear_button.setEnabled(True)
-        self.delete_button.setEnabled(True)
         self.processEvents()
-        self.progressUpdate.emit('Upload Stopped!')
+
+    def setupThreads(self):
+        if not self.workThreads:
+            for i in range(self._num_threads):
+                self.workThreads.append(ProcessThread(self))
+            for thread in self.workThreads:
+                thread.start()
 
     def upload(self):
-        self._stop = False
         self.upload_button.setEnabled(False)
         self.clear_button.setEnabled(False)
         self.delete_button.setEnabled(False)
-        if not self.workThreads:
-            for i in range(4):
-                self.workThreads.append( ProcessThread(self) )
-        self.progressUpdate.emit('Processing Items ... ')
         self.stop_button.setEnabled(True)
+        self.progressUpdate('Processing ...')
+        self._stop = False
+        self.setupThreads()
         self.processEvents()
-        for thread in self.workThreads:
-            thread.start()
 
     def closeEvent(self, event):
         self.stop()
-        self.clear_all()
-        self.hide()
+        self._hide = True
+        if not self.isWorking():
+            self.clear_all()
+            self.hide()
         event.ignore()
+
+    def showEvent(self, event):
+        self._hide = False
+        self.upload()
+        event.accept()
 
     def clear_all(self):
         self.MyTable.setRowCount(0)
-        self.progress_label.setText("")
+        self.progressUpdate('')
+        self.itemStatus = []
         self.parentWin.data_list= []
         self.parentWin.versions=[]
 
@@ -648,6 +685,13 @@ class UploadQueueTable(Form2, Base2):
                 self.itemStatus[rowIndex+1:] )
         self._mutex.unlock()
 
+    def completed(self):
+        self.clear_button.setEnabled(True)
+        self.delete_button.setEnabled(True)
+        if self._hide:
+            self.clear_all()
+            self.hide()
+
     def paths(self, i):
         project_name= self.MyTable.item(i, 0).text()
         episode_name= self.MyTable.item(i, 1).text()
@@ -656,6 +700,11 @@ class UploadQueueTable(Form2, Base2):
         return PathResolver(project_name, episode_name,
                 '_'.join( seq_name.split('_')[1:] ),
                 '_'.join( shot_name.split('_')[1:] ))
+
+    def isWorking(self):
+        done, busy, num = self.progress()
+        return bool(busy)
+
 
 class ProcessThread(QtCore.QThread):
     def __init__(self, p):

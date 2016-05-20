@@ -491,9 +491,10 @@ class UploadQueueTable(Form2, Base2):
                     self.allDone()
 
     def cleanup(self):
-        self.progressUpdate('Cleaning Up!!')
+        self.progressUpdate('Cleaning Up ... !!')
         for idx in range( self.MyTable.rowCount() ):
-            if self.itemStatus[idx] == self.RowStatus.kWaiting:
+            if self.itemStatus[idx] in [ self.RowStatus.kBusy,
+                    self.RowStatus.kFailed ]:
                 version = self.versions[idx]
                 if not version:
                     continue
@@ -725,11 +726,11 @@ class UploadQueueTable(Form2, Base2):
                     except:
                         pass
                 self.workThreads = []
+                self.cleanup()
                 for idx in range( self.MyTable.rowCount() ):
                     if self.itemStatus[idx] == self.RowStatus.kBusy:
                         self.itemStatus[idx] = self.RowStatus.kFailed
                         self.itemUpdate(idx, 'Stopped', 'red')
-                self.cleanup()
                 self.progressUpdate('Upload Stopped!')
                 self.allDone()
                 self.clear_button.setEnabled(True)

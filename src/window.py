@@ -531,7 +531,7 @@ class UploadQueueTable(Form2, Base2):
             file_path = paths.compPath
 
         if not os.path.exists(file_path):
-            self.itemUpdate(idx, 'File Not Found', 'red')
+            self.itemUpdate(idx, 'File not found', 'red')
             return False
 
         self.itemUpdate(idx, 'Linking ...', 'yellow')
@@ -582,7 +582,7 @@ class UploadQueueTable(Form2, Base2):
         version_string = 'V%03d'%version_number 
 
         if already_uploaded:
-            self.itemUpdate(idx, 'Version already exists!', 'green')
+            self.itemUpdate(idx, 'Version already exists!', 'blue')
             QApplication.processEvents()
             return True
 

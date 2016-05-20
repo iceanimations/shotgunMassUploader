@@ -388,7 +388,10 @@ class UploadQueueTable(Form2, Base2):
 
         self.itemStatus = []
         self.versions = []
-        self._mutex = QtCore.QMutex()
+        self.last_attempt = []
+        self.interval = 5
+
+        self._mutex = QtCore.QMutex(mode=QtCore.QMutex.Recursive)
         self._mainThreadId = QtCore.QThread.currentThreadId()
 
         self._stop = False
@@ -418,6 +421,7 @@ class UploadQueueTable(Form2, Base2):
         self._mutex.lock()
         self.itemStatus.append(self.RowStatus.kWaiting)
         self.versions.append(None)
+        self.last_attempt.append(0)
         self._mutex.unlock()
 
     def progressUpdate(self, text):
@@ -437,13 +441,17 @@ class UploadQueueTable(Form2, Base2):
             QApplication.processEvents()
 
     def getNextRow(self):
+        now = time.time()
         if self._stop:
             return -1
+        fails = len([True for status in self.itemStatus if status ==
+            self.RowStatus.kFailed])
         for rowIndex in range( self.MyTable.rowCount() ):
             if ( self.itemStatus[rowIndex] == self.RowStatus.kWaiting):
                 return rowIndex
         for rowIndex in range( self.MyTable.rowCount() ):
-            if ( self.itemStatus[rowIndex] == self.RowStatus.kFailed ):
+            if ( self.itemStatus[rowIndex] == self.RowStatus.kFailed and
+                    self.interval * fails < now - self.last_attempt[rowIndex]):
                 return rowIndex
         return -1
 
@@ -462,7 +470,7 @@ class UploadQueueTable(Form2, Base2):
             index = self.getNextRow()
             if index < 0:
                 self._mutex.unlock()
-                time.sleep(1)
+                time.sleep(10)
             else:
                 self.itemStatus[index] = self.RowStatus.kBusy
                 self._mutex.unlock()
@@ -472,10 +480,14 @@ class UploadQueueTable(Form2, Base2):
                         %( done, count, busy))
                 self.processEvents()
                 success = self.process_row(index, conn)
+                self._mutex.lock()
                 if success:
                     self.itemStatus[index] = self.RowStatus.kDone
                 else:
                     self.itemStatus[index] = self.RowStatus.kFailed
+                    self.last_attempt[index] = time.time()
+                    time.sleep(1)
+                self._mutex.unlock()
 
                 done, busy, count = self.progress()
                 if done == count:
@@ -608,8 +620,7 @@ class UploadQueueTable(Form2, Base2):
             self.processEvents()
             if version:
                 conn.delete('Version', version['id'])
-                self.version[idx] = None
-            self.itemStatus[idx] = self.RowStatus.kFailed
+                self.versions[idx] = None
             return False
 
         return True
@@ -689,7 +700,9 @@ class UploadQueueTable(Form2, Base2):
                 elif shot_type == 'Comp':
                     file_path = paths.compPath
                 if os.path.exists(file_path):
+                    self._mutex.lock()
                     self.itemStatus[rowIndex] = self.RowStatus.kWaiting
+                    self._mutex.unlock()
                     self.itemUpdate(rowIndex, '', 'white')
                     self.processEvents()
         return True
@@ -729,7 +742,9 @@ class UploadQueueTable(Form2, Base2):
                 self.cleanup()
                 for idx in range( self.MyTable.rowCount() ):
                     if self.itemStatus[idx] == self.RowStatus.kBusy:
+                        self._mutex.lock()
                         self.itemStatus[idx] = self.RowStatus.kFailed
+                        self._mutex.unlock()
                         self.itemUpdate(idx, 'Stopped', 'red')
                 self.progressUpdate('Upload Stopped!')
                 self.allDone()
@@ -776,13 +791,15 @@ class UploadQueueTable(Form2, Base2):
     def clear_all(self):
         self.MyTable.setRowCount(0)
         self.progressUpdate('')
+        self._mutex.lock()
         self.itemStatus = []
+        self._mutex.unlock()
         self.versions = []
 
     def delete(self):
-        self._mutex.lock()
         rowIndex = self.MyTable.currentRow()
         self.MyTable.removeRow(rowIndex)
+        self._mutex.lock()
         self.itemStatus = ( self.itemStatus[:rowIndex] +
                 self.itemStatus[rowIndex+1:] )
         self.versions = ( self.versions[:rowIndex] +

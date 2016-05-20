@@ -698,14 +698,14 @@ class UploadQueueTable(Form2, Base2):
         if mycolour=='red':
             mycolour = Qt.red
         elif mycolour=='green':
-            mycolour = Qt.green
+            mycolour = Qt.darkGreen
         elif mycolour=='blue':
             mycolour = Qt.blue
         elif mycolour=='yellow':
-            mycolour = Qt.yellow
+            mycolour = Qt.darkYellow
         else:
             mycolour = Qt.white
-        self.MyTable.item(rowPos, 5).setBackground(mycolour)
+        self.MyTable.item(rowPos, 5).setForeground(mycolour)
         self.processEvents()
 
     def stop(self):

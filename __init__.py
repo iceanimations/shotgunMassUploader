@@ -1,3 +1,3 @@
 from .src import window
-MainWindow = window.MainWindow
+MainWindow = window.Browser
 

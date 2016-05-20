@@ -36,15 +36,20 @@ PROXY= None
 user= getpass.getuser()
 sg, artist = None, None
 
+rootPath = osp.dirname(osp.dirname(__file__))
+filePath= osp.join(rootPath, 'files\project_file.txt')
+uiPath = osp.join(rootPath, 'ui')
+
+###############
+#  functions  #
+###############
+
+
 def connect():
     global sg, artist
     sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
     artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
     return True
-
-rootPath = osp.dirname(osp.dirname(__file__))
-filePath= osp.join(rootPath, 'files\project_file.txt')
-uiPath = osp.join(rootPath, 'ui')
 
 def getProjectMapping(path=filePath):
     if not os.path.exists(path) or not os.path.isfile(path):
@@ -53,6 +58,21 @@ def getProjectMapping(path=filePath):
         lines = f.readlines()
     return { line.split('=')[0].strip('\n'): line.split('=')[1].strip('\n') for
             line in lines }
+
+def create_hash(path, blocksize=2**20):
+    m = hashlib.md5()
+    with open( path , "rb" ) as f:
+        while True:
+            buf = f.read(blocksize)
+            if not buf:
+                break
+            m.update( buf )
+    return m.hexdigest()
+
+##############
+#  utilties  #
+##############
+
 
 class PathResolver(object):
     ''' All the local paths are resolved in this class '''
@@ -153,18 +173,13 @@ class PathResolver(object):
                         self.shot_re.match(name)]
         return None
 
-def create_hash(path, blocksize=2**20):
-    m = hashlib.md5()
-    with open( path , "rb" ) as f:
-        while True:
-            buf = f.read(blocksize)
-            if not buf:
-                break
-            m.update( buf )
-    return m.hexdigest()
+#################
+#  controllers  #
+#################
+
 
 Form, Base = uic.loadUiType(osp.join(uiPath, 'main.ui'))
-class MainWindow(Form, Base):
+class Browser(Form, Base):
     defaultProject = '--Select Project--'
     defaultEpisode = '--Select Episode--'
     defaultSequence = '--Select Sequence--'
@@ -340,6 +355,7 @@ class MainWindow(Form, Base):
             self.table.close()
             event.accept()
             sys.exit()
+
 
 Form2, Base2=uic.loadUiType(osp.join(uiPath, 'table.ui'))
 class UploadQueueTable(Form2, Base2):
@@ -792,6 +808,7 @@ class UploadQueueTable(Form2, Base2):
         done, busy, num = self.progress()
         return bool(busy)
 
+
 class ProcessThread(QtCore.QThread):
     def __init__(self, p):
         QtCore.QThread.__init__(self, parent=p)
@@ -802,6 +819,11 @@ class ProcessThread(QtCore.QThread):
 
     def run(self):
         self.parentWin.process_queue()
+
+
+#################
+#  run program  #
+#################
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

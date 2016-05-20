@@ -29,13 +29,30 @@ SCRIPT_NAME = 'TestScript'
 SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
 PROXY= None
 
-sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
+
+
+
+
 user= getpass.getuser()
-artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
+sg, artist = None, None
+
+def connect():
+    global sg, artist
+    sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
+    artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
+    return True
 
 rootPath = osp.dirname(osp.dirname(__file__))
 filePath= osp.join(rootPath, 'files\project_file.txt')
 uiPath = osp.join(rootPath, 'ui')
+
+def getProjectMapping(path=filePath):
+    if not os.path.exists(path) or not os.path.isfile(path):
+        return {}
+    with open(path) as f:
+        lines = f.readlines()
+    return { line.split('=')[0].strip('\n'): line.split('=')[1].strip('\n') for
+            line in lines }
 
 class PathResolver(object):
     ''' All the local paths are resolved in this class '''
@@ -55,7 +72,6 @@ class PathResolver(object):
         p_name = self.project
         with open(filePath) as f:
             all_projects = f.readlines()
-        #print all_projects
         for i in range(0, len(all_projects)):
             split=all_projects[i].split("=")
             if split[0].rstrip('\n')==p_name:
@@ -162,21 +178,57 @@ class MainWindow(Form, Base):
         self.current_proj=0
         self.table = UploadQueueTable(self)
         self.table.setWindowTitle("Upload Queue")
-        self.thread= ProcessThread(self) #upload thread
         self.multiSelectDropDrown = cui.MultiSelectComboBox(self)
-        self.verticalLayout.insertWidget(3, self.multiSelectDropDrown, )
+        self.verticalLayout.insertWidget(4, self.multiSelectDropDrown, )
+        self.connect_button.clicked.connect(self.connect)
+        self.disconnect_button.clicked.connect(self.disconnect)
+        self.disconnect_button.hide()
+
+        self._controls = [self.selectProject, self.selectEpi, self.selectSeq,
+                self.addshot_button, self.multiSelectDropDrown,
+                self.shot_check, self.animatic_check, self.comp_check]
+        for con in self._controls:
+            con.setEnabled(False)
+        self.selectProject.activated[str].connect(self.ProjActivated)
+        self.selectEpi.activated[str].connect(self.EpiActivated)
+        self.selectSeq.activated[str].connect(self.SeqActivated)
+        self.addshot_button.clicked.connect(self.AddShotActivated)
+        self.shot_check.setChecked(True)
 
 
+    def connect(self):
+        try:
+            connect()
+            self.populateProjects()
+            for con in self._controls:
+                con.setEnabled(True)
+            self.connect_button.hide()
+            self.disconnect_button.show()
+
+        except Exception as e:
+            import traceback
+            trace = traceback.format_exc()
+            msg = str(e) + '\n' + trace
+            msgBox.showMessage(msg=msg)
+
+    def disconnect(self):
+        global sg
+        sg=None
+        self.connect_button.show()
+        self.disconnect_button.hide()
+        for con in self._controls:
+            con.setEnabled(False)
+        for con in self._controls:
+            if hasattr(con, 'clear'):
+                con.clear()
+
+    def populateProjects(self):
         #initial setup. List of projects in drop down menu
-        projects= sg.find("Project",[],['id', 'name']) #finding all projects
-        for i in range(0, len(projects)):
-            self.selectProject.addItem(projects[i]['name']) #filling DD from shotgun projects
-
-
-        self.selectProject.activated[str].connect(self.ProjActivated) #filling episodes DD
-        self.selectEpi.activated[str].connect(self.EpiActivated) #filling sequences DD
-        self.selectSeq.activated[str].connect(self.SeqActivated) #filling shots DD
-        self.addshot_button.clicked.connect(self.AddShotActivated) #saving selected shot info to data_list (list)
+        projects= sg.find('Project', [], ['id', 'name']) #finding all projects
+        projectMapping = getProjectMapping()
+        for project in projects:
+            if projectMapping.has_key(project['name']):
+                self.selectProject.addItem(project['name']) #filling DD from # shotgun projects
 
     def showMessage(self, **kwargs):
         return msgBox.showMessage(self, 'SG Mass Uploader', **kwargs)
@@ -277,8 +329,17 @@ class MainWindow(Form, Base):
         if ( self.getProjectName() == self.defaultProject and
                 self.getEpName() == self.defaultEpisode and
                 self.getSeqName() == self.defaultSequence):
+            sys.exit()
             return False
         return True
+
+    def closeEvent(self, event):
+        if self.table.isWorking():
+            event.ignore()
+        else:
+            self.table.close()
+            event.accept()
+            sys.exit()
 
 Form2, Base2=uic.loadUiType(osp.join(uiPath, 'table.ui'))
 class UploadQueueTable(Form2, Base2):
@@ -310,6 +371,7 @@ class UploadQueueTable(Form2, Base2):
         self.delete_button.clicked.connect(self.delete)
 
         self.itemStatus = []
+        self.versions = []
         self._mutex = QtCore.QMutex()
         self._mainThreadId = QtCore.QThread.currentThreadId()
 
@@ -339,6 +401,7 @@ class UploadQueueTable(Form2, Base2):
         self.MyTable.setItem(rowPosition , 5, QTableWidgetItem(comments))
         self._mutex.lock()
         self.itemStatus.append(self.RowStatus.kWaiting)
+        self.versions.append(None)
         self._mutex.unlock()
 
     def progressUpdate(self, text):
@@ -359,16 +422,14 @@ class UploadQueueTable(Form2, Base2):
 
     def getNextRow(self):
         if self._stop:
-            return -1, []
+            return -1
         for rowIndex in range( self.MyTable.rowCount() ):
             if ( self.itemStatus[rowIndex] == self.RowStatus.kWaiting):
-                return rowIndex, [self.MyTable.item(rowIndex, c).text() for c in
-                        range(6)]
+                return rowIndex
         for rowIndex in range( self.MyTable.rowCount() ):
             if ( self.itemStatus[rowIndex] == self.RowStatus.kFailed ):
-                return rowIndex, [self.MyTable.item(rowIndex, c).text() for c in
-                        range(6)]
-        return -1, []
+                return rowIndex
+        return -1
 
     def progress(self):
         nRows = self.MyTable.rowCount()
@@ -382,16 +443,20 @@ class UploadQueueTable(Form2, Base2):
 
         while 1:
             self._mutex.lock()
-            index, data = self.getNextRow()
-            if not data:
+            index = self.getNextRow()
+            if index < 0:
                 self._mutex.unlock()
                 time.sleep(1)
             else:
                 self.itemStatus[index] = self.RowStatus.kBusy
                 self._mutex.unlock()
                 self.itemUpdate(index, 'Processing ... ', 'yellow')
+                done, busy, count = self.progress()
+                self.progressUpdate( '%d of %d Completed!, %d in progress ... '
+                        %( done, count, busy))
                 self.processEvents()
-                if self.process_row(index, data, conn):
+                success = self.process_row(index, conn)
+                if success:
                     self.itemStatus[index] = self.RowStatus.kDone
                 else:
                     self.itemStatus[index] = self.RowStatus.kFailed
@@ -409,10 +474,24 @@ class UploadQueueTable(Form2, Base2):
                             '%d of %d Completed!, Stopped!'%( done, count))
                     self.allDone()
 
-    def process_row(self, idx, data, conn=None):
+    def cleanup(self):
+        self.progressUpdate('Cleaning Up!!')
+        for idx in range( self.MyTable.rowCount() ):
+            if self.itemStatus[idx] == self.RowStatus.kWaiting:
+                version = self.versions[idx]
+                if not version:
+                    continue
+                if not sg:
+                    connect()
+                sg.delete('Version', version['id'])
+
+    def process_row(self, idx, conn=None):
         if conn is None:
+            if not sg:
+                connect()
             conn = sg
 
+        data = [self.MyTable.item(idx, c).text() for c in range(6)]
         project_name = data[0]
         episode_name = data[1]
         seq_name = data[2]
@@ -502,6 +581,7 @@ class UploadQueueTable(Form2, Base2):
             self.itemUpdate(idx, 'Uploading ...', 'yellow')
             QApplication.processEvents()
             version = conn.create('Version', data=version_data)
+            self.versions[idx] = version
             conn.upload('Version', version['id'], file_path, 'sg_uploaded_movie')
             sg.update("Version", version['id'], {'sg_hash': file_hash} )
             self.itemUpdate(idx, 'Uploaded!', 'green')
@@ -511,6 +591,7 @@ class UploadQueueTable(Form2, Base2):
             self.processEvents()
             if version:
                 conn.delete('Version', version['id'])
+                self.version[idx] = None
             self.itemStatus[idx] = self.RowStatus.kFailed
             return False
 
@@ -632,8 +713,13 @@ class UploadQueueTable(Form2, Base2):
                     if self.itemStatus[idx] == self.RowStatus.kBusy:
                         self.itemStatus[idx] = self.RowStatus.kFailed
                         self.itemUpdate(idx, 'Stopped', 'red')
+                self.cleanup()
                 self.progressUpdate('Upload Stopped!')
                 self.allDone()
+                self.clear_button.setEnabled(True)
+                self.delete_button.setEnabled(True)
+        else:
+                self.progressUpdate('Upload Stopped!')
                 self.clear_button.setEnabled(True)
                 self.delete_button.setEnabled(True)
         self.upload_button.setEnabled(True)
@@ -674,8 +760,7 @@ class UploadQueueTable(Form2, Base2):
         self.MyTable.setRowCount(0)
         self.progressUpdate('')
         self.itemStatus = []
-        self.parentWin.data_list= []
-        self.parentWin.versions=[]
+        self.versions = []
 
     def delete(self):
         self._mutex.lock()
@@ -683,6 +768,8 @@ class UploadQueueTable(Form2, Base2):
         self.MyTable.removeRow(rowIndex)
         self.itemStatus = ( self.itemStatus[:rowIndex] +
                 self.itemStatus[rowIndex+1:] )
+        self.versions = ( self.versions[:rowIndex] +
+                self.versions[rowIndex+1:] )
         self._mutex.unlock()
 
     def completed(self):
@@ -704,7 +791,6 @@ class UploadQueueTable(Form2, Base2):
     def isWorking(self):
         done, busy, num = self.progress()
         return bool(busy)
-
 
 class ProcessThread(QtCore.QThread):
     def __init__(self, p):

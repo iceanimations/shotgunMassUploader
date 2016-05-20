@@ -16,6 +16,24 @@
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <widget class="QToolButton" name="disconnect_button">
+        <property name="text">
+         <string>Disconnect</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="connect_button">
+        <property name="text">
+         <string>Connect</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
      <widget class="QComboBox" name="selectProject"/>
     </item>
     <item>
@@ -25,25 +43,29 @@
      <widget class="QComboBox" name="selectSeq"/>
     </item>
     <item>
-     <widget class="QRadioButton" name="animatic_check">
-      <property name="text">
-       <string>Animatic</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QRadioButton" name="shot_check">
-      <property name="text">
-       <string>Animation</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QRadioButton" name="comp_check">
-      <property name="text">
-       <string>Comp</string>
-      </property>
-     </widget>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <widget class="QRadioButton" name="animatic_check">
+        <property name="text">
+         <string>Animatic</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="shot_check">
+        <property name="text">
+         <string>Animation</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="comp_check">
+        <property name="text">
+         <string>Comp</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
     <item>
      <widget class="QToolButton" name="addshot_button">

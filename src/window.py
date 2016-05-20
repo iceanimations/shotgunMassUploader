@@ -820,6 +820,7 @@ class ProcessThread(QtCore.QThread):
     def run(self):
         self.parentWin.process_queue()
 
+MainWindow = Browser
 
 #################
 #  run program  #
@@ -827,7 +828,7 @@ class ProcessThread(QtCore.QThread):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    win = MainWindow()
+    win = Browser()
     win.setWindowTitle("Select your file")
     win.show()
     sys.exit(app.exec_())

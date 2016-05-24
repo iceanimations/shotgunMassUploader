@@ -810,7 +810,7 @@ class UploadQueueTable(Form2, Base2):
 
     def showEvent(self, event):
         self._hide = False
-        self.upload()
+        # self.upload()
         event.accept()
 
     def clear_all(self):

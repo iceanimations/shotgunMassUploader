@@ -18,6 +18,7 @@ import hashlib
 import getpass
 import re
 import time
+import logging
 
 sys.path.insert(0, "R:\\Pipe_Repo\\Users\\Iqra\\modules")
 sys.path.append("R:\\Pipe_Repo\\Users\\Qurban\\utilities")
@@ -28,6 +29,11 @@ SERVER_PATH = 'https://iceanimations.shotgunstudio.com'
 SCRIPT_NAME = 'TestScript'
 SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
 PROXY= None
+
+
+logging.basicConfig()
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
 
 user = getpass.getuser()
@@ -201,17 +207,22 @@ class Browser(Form, Base):
                 self.shot_check, self.animatic_check, self.comp_check]
         for con in self._controls:
             con.setEnabled(False)
+
         self.selectProject.activated[str].connect(self.ProjActivated)
         self.selectEpi.activated[str].connect(self.EpiActivated)
         self.selectSeq.activated[str].connect(self.SeqActivated)
         self.addshot_button.clicked.connect(self.AddShotActivated)
         self.shot_check.setChecked(True)
 
+        self.logText = cui.QTextLogHandler(self.logText)
+        self.logText.addLogger(logger)
+
 
     def connect(self):
         try:
             connect()
             self.populateProjects()
+            logger.info('Connection Successful')
             for con in self._controls:
                 con.setEnabled(True)
             self.connect_button.hide()
@@ -221,6 +232,7 @@ class Browser(Form, Base):
             import traceback
             trace = traceback.format_exc()
             msg = str(e) + '\n' + trace
+            logger.error(msg)
             msgBox.showMessage(self, title='Shotgun Connection Problem',
                     msg='Cannot connect to Shotgun!',
                     icon=QMessageBox.Warning,
@@ -236,6 +248,7 @@ class Browser(Form, Base):
         for con in self._controls:
             if hasattr(con, 'clear'):
                 con.clear()
+        logger.info('Disconnected')
 
     def populateProjects(self):
         #initial setup. List of projects in drop down menu
@@ -299,8 +312,7 @@ class Browser(Form, Base):
 
         self.paths.sequence = self.getSeqName()
         self.multiSelectDropDrown.addItems(["All"], selected=[])
-        for shot in self.paths.shots:
-            self.multiSelectDropDrown.addItems([shot], selected=[])
+        self.multiSelectDropDrown.addItems(self.paths.shots, selected=[])
 
     def AddShotActivated(self):
         if not (self.animatic_check.isChecked() or self.shot_check.isChecked()
@@ -426,9 +438,11 @@ class UploadQueueTable(Form2, Base2):
 
     def progressUpdate(self, text):
         self._updateProgressLabel.emit(text)
+        logger.info(text)
 
     def itemUpdate(self, idx, msg, color):
         self._updateTableItemStatus.emit(idx, msg, color)
+        logger.info('%d: %s: %s' %(idx, self.MyTable.item(idx, 2).text(), msg))
 
     def allDone(self):
         self._completed.emit()
@@ -617,6 +631,7 @@ class UploadQueueTable(Form2, Base2):
             self.processEvents()
         except Exception as e:
             self.itemUpdate(idx, 'Error: %s'%str(e), 'red')
+            logger.error('Error Uploading file: %s: %s'%( file_path, str(e) ))
             self.processEvents()
             if version:
                 conn.delete('Version', version['id'])

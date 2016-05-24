@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>377</width>
-    <height>244</height>
+    <height>333</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -66,6 +66,9 @@
        </widget>
       </item>
      </layout>
+    </item>
+    <item>
+     <widget class="QTextEdit" name="logText"/>
     </item>
     <item>
      <widget class="QToolButton" name="addshot_button">

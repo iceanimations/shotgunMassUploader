@@ -19,6 +19,7 @@ import getpass
 import re
 import time
 import logging
+import traceback
 
 sys.path.insert(0, "R:\\Pipe_Repo\\Users\\Iqra\\modules")
 sys.path.append("R:\\Pipe_Repo\\Users\\Qurban\\utilities")
@@ -229,7 +230,6 @@ class Browser(Form, Base):
             self.disconnect_button.show()
 
         except Exception as e:
-            import traceback
             trace = traceback.format_exc()
             msg = str(e) + '\n' + trace
             logger.error(msg)
@@ -351,6 +351,8 @@ class Browser(Form, Base):
                 self.table.setColour(self.table.MyTable.rowCount()-1,
                         "red")
             QApplication.processEvents()
+
+        logger.info('%d jobs added'%len(shots))
 
     def check_input(self): #validating correct input
         if ( self.getProjectName() == self.defaultProject and
@@ -477,9 +479,16 @@ class UploadQueueTable(Form2, Base2):
             self.itemStatus[rowIndex] == self.RowStatus.kBusy]), nRows
 
     def process_queue(self):
-        conn = Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
+        conn = None
 
         while 1:
+
+            if not conn:
+                try:
+                    conn = Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
+                except Exception as e:
+                    logger.error(str(e) + '\n' + traceback.format_exc())
+
             self._mutex.lock()
             index = self.getNextRow()
             if index < 0:
@@ -493,6 +502,7 @@ class UploadQueueTable(Form2, Base2):
                 self.progressUpdate( '%d of %d Completed!, %d in progress ... '
                         %( done, count, busy))
                 self.processEvents()
+                success = False
                 success = self.process_row(index, conn)
                 self._mutex.lock()
                 if success:
@@ -529,98 +539,99 @@ class UploadQueueTable(Form2, Base2):
                 sg.delete('Version', version['id'])
 
     def process_row(self, idx, conn=None):
-        if conn is None:
-            if not sg:
-                connect()
-            conn = sg
-
-        data = [self.MyTable.item(idx, c).text() for c in range(6)]
-        project_name = data[0]
-        episode_name = data[1]
-        seq_name = data[2]
-        shot_name = data[3]
-        shot_type = data[4]
-
-        paths = self.paths(idx)
-        version_code_postfix = ''
-
-        if shot_type == "Animation":
-            version_code_postfix = '_'.join(['animation', 'preview'])
-            file_path = paths.animationPath
-
-        elif shot_type == 'Animatic':
-            version_code_postfix = 'animatic'
-            file_path = paths.animaticPath
-
-        elif shot_type == 'Comp':
-            version_code_postfix = '_'.join(['comp', 'preview'])
-            file_path = paths.compPath
-
-        if not os.path.exists(file_path):
-            self.itemUpdate(idx, 'File not found', 'red')
-            return False
-
-        self.itemUpdate(idx, 'Linking ...', 'yellow')
-        project = conn.find_one("Project",[['name','is',project_name]],['id', 'name'])
-
-        #EPI DETAILS
-        if episode_name!="No Episode":
-            episode = conn.find_one("CustomEntity01",[['code','is',episode_name], ['project', 'is', project]],['id', 'code'])
-            if not episode:
-                episode=self.create_episode(project, episode_name)
-        else:
-            episode= []
-
-        #SEQ DETAILS
-        seq = conn.find_one("Sequence",[['code','is',seq_name],['project', 'is', project]],['id', 'code'])
-        if not seq:
-            seq= self.create_sequence(project, episode, seq_name)
-
-        #SHOT DETAILS
-        shot = conn.find_one("Shot",[['code','is',shot_name], ['project', 'is', project], ['sg_sequence', 'is', seq]],['id', 'code'])
-        if not shot:
-            shot=self.create_shot(project, shot_name, seq) #create new shot
-
         version = None
-
-        version_filters = []
-        version_filters.append(('project', 'is', project))
-        version_filters.append(('entity', 'is', shot))
-        version_filters.append(('code', 'contains',
-            version_code_postfix))
-
-        file_hash = create_hash(file_path)
-        all_versions = conn.find('Version', version_filters, ['code',
-            'sg_hash', 'created_at'])
-
-        already_uploaded, max_version, version_number = False, None, 1
-
-        if all_versions:
-            already_uploaded = any([ver['sg_hash']==file_hash for ver
-                in all_versions])
-            max_version = max(all_versions, key=self.get_version_number)
-
-        if max_version:
-            version_number = self.get_version_number(max_version) + 1
-
-        if version_number <= 0:
-            version_number = 1
-        version_string = 'V%03d'%version_number 
-
-        if already_uploaded:
-            self.itemUpdate(idx, 'Version already exists!', 'blue')
-            QApplication.processEvents()
-            return True
-
-        version_data = {
-            'project': {'type':'Project', 'id':project['id']},
-            'code': '_'.join([shot['code'], version_code_postfix, version_string]),
-            'entity': {'type':'Shot', 'id': shot['id']},
-            'user': artist,
-            'created_by': artist
-        }
-
         try:
+            if conn is None:
+                if not sg:
+                    connect()
+                conn = sg
+
+            data = [self.MyTable.item(idx, c).text() for c in range(6)]
+            project_name = data[0]
+            episode_name = data[1]
+            seq_name = data[2]
+            shot_name = data[3]
+            shot_type = data[4]
+
+            paths = self.paths(idx)
+            version_code_postfix = ''
+
+            if shot_type == "Animation":
+                version_code_postfix = '_'.join(['animation', 'preview'])
+                file_path = paths.animationPath
+
+            elif shot_type == 'Animatic':
+                version_code_postfix = 'animatic'
+                file_path = paths.animaticPath
+
+            elif shot_type == 'Comp':
+                version_code_postfix = '_'.join(['comp', 'preview'])
+                file_path = paths.compPath
+
+            if not os.path.exists(file_path):
+                self.itemUpdate(idx, 'File not found', 'red')
+                return False
+
+            self.itemUpdate(idx, 'Linking ...', 'yellow')
+            project = conn.find_one("Project",[['name','is',project_name]],['id', 'name'])
+
+            #EPI DETAILS
+            if episode_name!="No Episode":
+                episode = conn.find_one("CustomEntity01",[['code','is',episode_name], ['project', 'is', project]],['id', 'code'])
+                if not episode:
+                    episode=self.create_episode(project, episode_name)
+            else:
+                episode= []
+
+            #SEQ DETAILS
+            seq = conn.find_one("Sequence",[['code','is',seq_name],['project', 'is', project]],['id', 'code'])
+            if not seq:
+                seq= self.create_sequence(project, episode, seq_name)
+
+            #SHOT DETAILS
+            shot = conn.find_one("Shot",[['code','is',shot_name], ['project', 'is', project], ['sg_sequence', 'is', seq]],['id', 'code'])
+            if not shot:
+                shot=self.create_shot(project, shot_name, seq) #create new shot
+
+            version = None
+
+            version_filters = []
+            version_filters.append(('project', 'is', project))
+            version_filters.append(('entity', 'is', shot))
+            version_filters.append(('code', 'contains',
+                version_code_postfix))
+
+            file_hash = create_hash(file_path)
+            all_versions = conn.find('Version', version_filters, ['code',
+                'sg_hash', 'created_at'])
+
+            already_uploaded, max_version, version_number = False, None, 1
+
+            if all_versions:
+                already_uploaded = any([ver['sg_hash']==file_hash for ver
+                    in all_versions])
+                max_version = max(all_versions, key=self.get_version_number)
+
+            if max_version:
+                version_number = self.get_version_number(max_version) + 1
+
+            if version_number <= 0:
+                version_number = 1
+            version_string = 'V%03d'%version_number 
+
+            if already_uploaded:
+                self.itemUpdate(idx, 'Version already exists!', 'blue')
+                QApplication.processEvents()
+                return True
+
+            version_data = {
+                'project': {'type':'Project', 'id':project['id']},
+                'code': '_'.join([shot['code'], version_code_postfix, version_string]),
+                'entity': {'type':'Shot', 'id': shot['id']},
+                'user': artist,
+                'created_by': artist
+            }
+
             self.itemUpdate(idx, 'Uploading ...', 'yellow')
             QApplication.processEvents()
             version = conn.create('Version', data=version_data)
@@ -631,7 +642,6 @@ class UploadQueueTable(Form2, Base2):
             self.processEvents()
         except Exception as e:
             self.itemUpdate(idx, 'Error: %s'%str(e), 'red')
-            logger.error('Error Uploading file: %s: %s'%( file_path, str(e) ))
             self.processEvents()
             if version:
                 conn.delete('Version', version['id'])
@@ -810,6 +820,7 @@ class UploadQueueTable(Form2, Base2):
         self.itemStatus = []
         self._mutex.unlock()
         self.versions = []
+        logger.info('All Jobs Cleared')
 
     def delete(self):
         rowIndex = self.MyTable.currentRow()

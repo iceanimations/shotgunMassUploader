@@ -30,10 +30,7 @@ SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
 PROXY= None
 
 
-
-
-
-user= getpass.getuser()
+user = getpass.getuser()
 sg, artist = None, None
 
 rootPath = osp.dirname(osp.dirname(__file__))
@@ -224,7 +221,10 @@ class Browser(Form, Base):
             import traceback
             trace = traceback.format_exc()
             msg = str(e) + '\n' + trace
-            msgBox.showMessage(msg=msg)
+            msgBox.showMessage(self, title='Shotgun Connection Problem',
+                    msg='Cannot connect to Shotgun!',
+                    icon=QMessageBox.Warning,
+                    ques='Do you have access to internet?', details=msg)
 
     def disconnect(self):
         global sg

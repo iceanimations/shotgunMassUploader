@@ -12,7 +12,6 @@ from PyQt4 import uic, QtCore
 from PyQt4.QtCore import Qt, pyqtSignal
 import sys
 import os
-from shotgun_api3 import Shotgun
 import os.path as osp
 import hashlib
 import getpass
@@ -20,6 +19,11 @@ import re
 import time
 import logging
 import traceback
+
+import shotgun_api3
+shotgun_api3.shotgun.NO_SSL_VALIDATION = True
+from shotgun_api3 import Shotgun
+
 
 sys.path.insert(0, "R:\\Pipe_Repo\\Users\\Iqra\\modules")
 sys.path.append("R:\\Pipe_Repo\\Users\\Qurban\\utilities")
@@ -29,13 +33,11 @@ import msgBox
 SERVER_PATH = 'https://iceanimations.shotgunstudio.com'
 SCRIPT_NAME = 'TestScript'
 SCRIPT_KEY = '446a726a387c5f8372b1b6e6d30e4cd05d022475b51ea82ebe1cff34896cf2f2'
-PROXY= None
+PROXY = '10.10.2.254:3128'
 
 
 logging.basicConfig()
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
 
 user = getpass.getuser()
 sg, artist = None, None
@@ -49,9 +51,12 @@ uiPath = osp.join(rootPath, 'ui')
 ###############
 
 
-def connect():
+def connect(useProxy=False):
     global sg, artist
-    sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=PROXY)
+    proxy = None
+    if useProxy:
+        proxy = PROXY
+    sg= Shotgun(SERVER_PATH, SCRIPT_NAME, SCRIPT_KEY, http_proxy=proxy)
     artist= sg.find_one("HumanUser", [['name', 'is', "ICE Animations"]], ['name'])
     return True
 
@@ -221,12 +226,13 @@ class Browser(Form, Base):
 
     def connect(self):
         try:
-            connect()
+            connect(self.proxyCheck.isChecked())
             self.populateProjects()
             logger.info('Connection Successful')
             for con in self._controls:
                 con.setEnabled(True)
             self.connect_button.hide()
+            self.proxyCheck.setEnabled(False)
             self.disconnect_button.show()
 
         except Exception as e:
@@ -248,6 +254,7 @@ class Browser(Form, Base):
         for con in self._controls:
             if hasattr(con, 'clear'):
                 con.clear()
+        self.proxyCheck.setEnabled(True)
         logger.info('Disconnected')
 
     def populateProjects(self):
@@ -535,7 +542,7 @@ class UploadQueueTable(Form2, Base2):
                 if not version:
                     continue
                 if not sg:
-                    connect()
+                    connect(self.parent.proxyCheck.isChecked())
                 sg.delete('Version', version['id'])
 
     def process_row(self, idx, conn=None):
@@ -543,7 +550,7 @@ class UploadQueueTable(Form2, Base2):
         try:
             if conn is None:
                 if not sg:
-                    connect()
+                    connect(self.parent.proxyCheck.isChecked())
                 conn = sg
 
             data = [self.MyTable.item(idx, c).text() for c in range(6)]

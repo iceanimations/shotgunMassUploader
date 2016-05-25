@@ -203,7 +203,7 @@ class Browser(Form, Base):
         self.table = UploadQueueTable(self)
         self.table.setWindowTitle("Upload Queue")
         self.multiSelectDropDrown = cui.MultiSelectComboBox(self)
-        self.verticalLayout.insertWidget(4, self.multiSelectDropDrown, )
+        self.verticalLayout.insertWidget(5, self.multiSelectDropDrown, )
         self.connect_button.clicked.connect(self.connect)
         self.disconnect_button.clicked.connect(self.disconnect)
         self.disconnect_button.hide()

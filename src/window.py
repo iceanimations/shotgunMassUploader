@@ -19,6 +19,8 @@ import re
 import time
 import logging
 import traceback
+import subprocess
+import tempfile
 
 import shotgun_api3
 shotgun_api3.shotgun.NO_SSL_VALIDATION = True
@@ -77,6 +79,19 @@ def create_hash(path, blocksize=2**20):
                 break
             m.update( buf )
     return m.hexdigest()
+
+def makeMovie(seq, out):
+    command = []
+    command.append( r'R:\Pipe_Repo\Users\Qurban\applications\ffmpeg\bin\ffmpeg.exe' )
+    command.extend([ '-i', seq ])
+    command.extend(['-c:v', 'prores'])
+    command.extend([ '-r', '25' ])
+    command.extend([ '-pix_fmt', 'yuv420p' ]) 
+    command.append(out)
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    logger.info('Making Movie for : ' + seq)
+    subprocess.check_call(command, stdout = subprocess.PIPE)
 
 ##############
 #  utilties  #
@@ -142,15 +157,43 @@ class PathResolver(object):
         return os.path.join(self.shotPath, 'animation', 'preview',
                 self.episode + '_' + self.shot + '.mov')
 
+    epNum_re = re.compile('ep(\d+)', re.I)
     @property
     def animaticPath(self):
-        return os.path.join(self.shotPath, 'animatic', self.episode + '_' +
+        ep = self.episode
+        match = self.epNum_re.match(self.episode)
+        if match:
+            epnum = int(match.group(1))
+            ep = 'ep%03d'%epnum
+        return os.path.join(self.shotPath, 'animatic', ep + '_' +
                 self.shot + '_animatic.mov')
 
     @property
+    def animaticSequencePath(self):
+        ep = self.episode
+        match = self.epNum_re.match(self.episode)
+        if match:
+            epnum = int(match.group(1))
+            ep = 'EP%03d'%epnum
+        return os.path.join(self.shotPath, 'animatic', ep + '_' +
+                self.shot + '_animatic.%04d.jpg')
+
+    def animaticSequenceExists(self):
+        path = self.animaticSequencePath
+        dirname, basename  = os.path.split(path)
+        altbasename = re.sub(r'%0(\d)d', r'\d{\1,}', basename)
+        if os.path.exists(dirname) and os.path.isdir(dirname):
+            files = os.listdir(dirname)
+            for phile in files:
+                print altbasename, phile, bool(re.match(altbasename, phile))
+                if re.match(altbasename, phile):
+                    return True
+        return False
+
+    @property
     def compPath(self):
-        return os.path.join(self.shotPath, 'comp', 'preview', self.episode
-                + '_' + self.shot + '.mov')
+        return os.path.join(self.shotPath, 'comp', 'preview', self.episode +
+                '_' + self.shot + '.mov')
 
     episode_re = re.compile(r'^ep\d+', re.I)
     @property
@@ -385,7 +428,7 @@ class UploadQueueTable(Form2, Base2):
     _updateTableItemStatus = pyqtSignal(int, str, str)
     _completed = pyqtSignal()
 
-    _num_threads = 4
+    _num_threads = 1
 
     class RowStatus:
         kWaiting = 0
@@ -562,6 +605,7 @@ class UploadQueueTable(Form2, Base2):
 
             paths = self.paths(idx)
             version_code_postfix = ''
+            file_seq_path = ''
 
             if shot_type == "Animation":
                 version_code_postfix = '_'.join(['animation', 'preview'])
@@ -570,14 +614,24 @@ class UploadQueueTable(Form2, Base2):
             elif shot_type == 'Animatic':
                 version_code_postfix = 'animatic'
                 file_path = paths.animaticPath
+                if paths.animaticSequenceExists:
+                    file_seq_path = paths.animaticSequencePath
 
             elif shot_type == 'Comp':
                 version_code_postfix = '_'.join(['comp', 'preview'])
                 file_path = paths.compPath
 
             if not os.path.exists(file_path):
-                self.itemUpdate(idx, 'File not found', 'red')
-                return False
+                if file_seq_path:
+                    file_path = tempfile.mktemp() + '.%d'%idx + '.mov'
+                    self.itemUpdate(idx, 'Making Movie', 'yellow')
+                    makeMovie(file_seq_path, file_path)
+                    if not os.path.exists(file_path):
+                        self.itemUpdate(idx, 'Movie creation failed', 'red')
+                        return False
+                else:
+                    self.itemUpdate(idx, 'File not found', 'red')
+                    return False
 
             self.itemUpdate(idx, 'Linking ...', 'yellow')
             project = conn.find_one("Project",[['name','is',project_name]],['id', 'name'])
@@ -588,7 +642,7 @@ class UploadQueueTable(Form2, Base2):
                 if not episode:
                     episode=self.create_episode(project, episode_name)
             else:
-                episode= []
+                episode = []
 
             #SEQ DETAILS
             seq = conn.find_one("Sequence",[['code','is',seq_name],['project', 'is', project]],['id', 'code'])

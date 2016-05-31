@@ -40,6 +40,7 @@ PROXY = '10.10.2.254:3128'
 
 logging.basicConfig()
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 user = getpass.getuser()
 sg, artist = None, None
@@ -80,16 +81,18 @@ def create_hash(path, blocksize=2**20):
             m.update( buf )
     return m.hexdigest()
 
-def makeMovie(seq, out):
+def makeMovie(seq, frames, out):
     command = []
     command.append( r'R:\Pipe_Repo\Users\Qurban\applications\ffmpeg\bin\ffmpeg.exe' )
+    command.extend(['-start_number', '%d'%min(frames)])
     command.extend([ '-i', seq ])
     command.extend(['-c:v', 'prores'])
     command.extend([ '-r', '25' ])
-    command.extend([ '-pix_fmt', 'yuv420p' ]) 
+    # command.extend([ '-pix_fmt', 'yuv420p' ]) 
     command.append(out)
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    if os.name == 'nt':
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     logger.info('Making Movie for : ' + seq)
     subprocess.check_call(command, stdout = subprocess.PIPE)
 
@@ -175,20 +178,23 @@ class PathResolver(object):
         if match:
             epnum = int(match.group(1))
             ep = 'EP%03d'%epnum
-        return os.path.join(self.shotPath, 'animatic', ep + '_' +
+        path = os.path.join(self.shotPath, 'animatic', ep + '_' +
                 self.shot + '_animatic.%04d.jpg')
-
-    def animaticSequenceExists(self):
-        path = self.animaticSequencePath
+        frames = []
         dirname, basename  = os.path.split(path)
-        altbasename = re.sub(r'%0(\d)d', r'\d{\1,}', basename)
+        basename_re = re.sub(r'%0(\d)d', r'(\d{\1,})', basename)
         if os.path.exists(dirname) and os.path.isdir(dirname):
             files = os.listdir(dirname)
             for phile in files:
-                print altbasename, phile, bool(re.match(altbasename, phile))
-                if re.match(altbasename, phile):
-                    return True
-        return False
+                match = re.match(basename_re, phile)
+                if match:
+                    frame_no = int(match.group(1))
+                    frames.append(frame_no)
+        return path, frames
+
+    def animaticSequenceExists(self):
+        path, frames = self.animaticSequencePath
+        return bool(frames)
 
     @property
     def compPath(self):
@@ -489,12 +495,12 @@ class UploadQueueTable(Form2, Base2):
         self._mutex.unlock()
 
     def progressUpdate(self, text):
-        self._updateProgressLabel.emit(text)
         logger.info(text)
+        self._updateProgressLabel.emit(text)
 
     def itemUpdate(self, idx, msg, color):
+        logger.info('%d: %s: %s' %(idx, self.MyTable.item(idx, 3).text(), msg))
         self._updateTableItemStatus.emit(idx, msg, color)
-        logger.info('%d: %s: %s' %(idx, self.MyTable.item(idx, 2).text(), msg))
 
     def allDone(self):
         self._completed.emit()
@@ -615,7 +621,7 @@ class UploadQueueTable(Form2, Base2):
                 version_code_postfix = 'animatic'
                 file_path = paths.animaticPath
                 if paths.animaticSequenceExists:
-                    file_seq_path = paths.animaticSequencePath
+                    file_seq_path, frames = paths.animaticSequencePath
 
             elif shot_type == 'Comp':
                 version_code_postfix = '_'.join(['comp', 'preview'])
@@ -625,7 +631,7 @@ class UploadQueueTable(Form2, Base2):
                 if file_seq_path:
                     file_path = tempfile.mktemp() + '.%d'%idx + '.mov'
                     self.itemUpdate(idx, 'Making Movie', 'yellow')
-                    makeMovie(file_seq_path, file_path)
+                    makeMovie(file_seq_path, frames, file_path)
                     if not os.path.exists(file_path):
                         self.itemUpdate(idx, 'Movie creation failed', 'red')
                         return False
@@ -703,6 +709,7 @@ class UploadQueueTable(Form2, Base2):
             self.processEvents()
         except Exception as e:
             self.itemUpdate(idx, 'Error: %s'%str(e), 'red')
+            logger.error(str(e) + '\n' + traceback.format_exc())
             self.processEvents()
             if version:
                 conn.delete('Version', version['id'])

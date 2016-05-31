@@ -434,7 +434,7 @@ class UploadQueueTable(Form2, Base2):
     _updateTableItemStatus = pyqtSignal(int, str, str)
     _completed = pyqtSignal()
 
-    _num_threads = 1
+    _num_threads = 4
 
     class RowStatus:
         kWaiting = 0

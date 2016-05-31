@@ -160,6 +160,19 @@ class PathResolver(object):
         return os.path.join(self.shotPath, 'animation', 'preview',
                 self.episode + '_' + self.shot + '.mov')
 
+    @property
+    def animationSequencePath(self):
+        animSeqPath = os.path.join(self.shotPath, 'animation', 'preview', 'jpg',
+                self.episode + '_' + self.shot + '.%05d.mov')
+        frames = PathResolver.getSeqFrames(animSeqPath)
+        return path, frames
+
+    @property
+    def animationSequenceExists(self):
+        _, frames = animationSequencePath
+        return bool(frames)
+
+
     epNum_re = re.compile('ep(\d+)', re.I)
     @property
     def animaticPath(self):
@@ -171,6 +184,22 @@ class PathResolver(object):
         return os.path.join(self.shotPath, 'animatic', ep + '_' +
                 self.shot + '_animatic.mov')
 
+    @staticmethod
+    def getSeqFrames(seqPath):
+        frames = []
+        dirname, basename  = os.path.split(seqPath)
+        basename_re = re.sub(r'%0(\d)d', r'(\d{\1,})', basename)
+        if os.path.exists(dirname) and os.path.isdir(dirname):
+            files = os.listdir(dirname)
+            for phile in files:
+                if not os.path.isfile(os.path.join(dirname, phile)):
+                    continue
+                match = re.match(basename_re, phile)
+                if match:
+                    frame_no = int(match.group(1))
+                    frames.append(frame_no)
+        return frames
+
     @property
     def animaticSequencePath(self):
         ep = self.episode
@@ -180,26 +209,42 @@ class PathResolver(object):
             ep = 'EP%03d'%epnum
         path = os.path.join(self.shotPath, 'animatic', ep + '_' +
                 self.shot + '_animatic.%04d.jpg')
-        frames = []
-        dirname, basename  = os.path.split(path)
-        basename_re = re.sub(r'%0(\d)d', r'(\d{\1,})', basename)
-        if os.path.exists(dirname) and os.path.isdir(dirname):
-            files = os.listdir(dirname)
-            for phile in files:
-                match = re.match(basename_re, phile)
-                if match:
-                    frame_no = int(match.group(1))
-                    frames.append(frame_no)
+        frames = PathResolver.getSeqFrames(path)
         return path, frames
 
+    @property
     def animaticSequenceExists(self):
-        path, frames = self.animaticSequencePath
+        _, frames = self.animaticSequencePath
         return bool(frames)
 
+    renders_base_path = r"\\RENDERS\Storage\Projects"
     @property
     def compPath(self):
-        return os.path.join(self.shotPath, 'comp', 'preview', self.episode +
-                '_' + self.shot + '.mov')
+        drive, projPath = os.path.splitdrive(self.projectPath)
+        projPath = projPath.strip('/').strip('\\')
+        projPath = os.path.join(self.renders_base_path, projPath)
+        ep = self.episode
+        match = self.epNum_re.match(self.episode)
+        if match:
+            epnum = int(match.group(1))
+            ep = 'EP%03d'%epnum
+        epPath = os.path.join(projPath, '2D', ep)
+        seqPath = os.path.join(epPath, 'Output', self.sequence.split('_')[-1])
+        shotPath = os.path.join(seqPath, self.shot)
+        compPath = os.path.join(shotPath, self.shot + '.mov' )
+        return compPath
+
+    @property
+    def compSequencePath(self):
+        shotPath, _ = os.path.split(self.compPath)
+        compSeqPath = os.path.join(shotPath, self.shot + '.%04d.jpg' )
+        frames = PathResolver.getSeqFrames(compSeqPath)
+        return compSeqPath, frames
+
+    @property
+    def compSequenceExists(self):
+        _, frames = self.compSequencePath
+        return bool(frames)
 
     episode_re = re.compile(r'^ep\d+', re.I)
     @property
@@ -390,22 +435,28 @@ class Browser(Form, Base):
             if self.animatic_check.isChecked():
                 clip_type = 'Animatic'
                 clip_path = self.paths.animaticPath
+                seq_path, frames = self.paths.animaticSequencePath
             elif self.shot_check.isChecked():
                 clip_type = 'Animation'
                 clip_path = self.paths.animationPath
+                seq_path, frames = self.paths.animationSequencePath
             elif self.comp_check.isChecked():
                 clip_type = 'Comp'
                 clip_path = self.paths.compPath
+                seq_path, frames = self.paths.compSequencePath
 
             self.table.setData( self.getProjectName(),
                     self.getEpName(),
                     self.getEpName() + "_"+ self.getSeqName(),
                     self.getEpName() + "_" + shot, clip_type, "")
             if not os.path.exists(clip_path):
-                self.table.MyTable.setItem(self.table.MyTable.rowCount()-1
-                        , 5, QTableWidgetItem("File not found"))
-                self.table.setColour(self.table.MyTable.rowCount()-1,
-                        "red")
+                if not frames:
+                    self.table.itemUpdate(self.table.MyTable.rowCount()-1,
+                            'File Not Found', 'red')
+                else:
+                    self.table.itemUpdate(self.table.MyTable.rowCount()-1,
+                            'Frame Sequence Found', 'yellow')
+
             QApplication.processEvents()
 
         logger.info('%d jobs added'%len(shots))
@@ -616,6 +667,8 @@ class UploadQueueTable(Form2, Base2):
             if shot_type == "Animation":
                 version_code_postfix = '_'.join(['animation', 'preview'])
                 file_path = paths.animationPath
+                if paths.animationSequenceExists:
+                    file_seq_path, frames = paths.animationSequencePath
 
             elif shot_type == 'Animatic':
                 version_code_postfix = 'animatic'
@@ -626,6 +679,8 @@ class UploadQueueTable(Form2, Base2):
             elif shot_type == 'Comp':
                 version_code_postfix = '_'.join(['comp', 'preview'])
                 file_path = paths.compPath
+                if paths.compSequenceExists:
+                    file_seq_path, frames = paths.compSequencePath
 
             if not os.path.exists(file_path):
                 if file_seq_path:

@@ -86,9 +86,8 @@ def makeMovie(seq, frames, out):
     command.append( r'R:\Pipe_Repo\Users\Qurban\applications\ffmpeg\bin\ffmpeg.exe' )
     command.extend(['-start_number', '%d'%min(frames)])
     command.extend([ '-i', seq ])
-    command.extend(['-c:v', 'prores'])
+    command.extend(['-c:v', 'libx264'])
     command.extend([ '-r', '25' ])
-    # command.extend([ '-pix_fmt', 'yuv420p' ]) 
     command.append(out)
     if os.name == 'nt':
         startupinfo = subprocess.STARTUPINFO()
@@ -165,7 +164,7 @@ class PathResolver(object):
         animSeqPath = os.path.join(self.shotPath, 'animation', 'preview', 'jpg',
                 self.episode + '_' + self.shot + '.%05d.mov')
         frames = PathResolver.getSeqFrames(animSeqPath)
-        return path, frames
+        return animSeqPath, frames
 
     @property
     def animationSequenceExists(self):

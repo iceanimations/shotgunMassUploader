@@ -168,7 +168,7 @@ class PathResolver(object):
 
     @property
     def animationSequenceExists(self):
-        _, frames = animationSequencePath
+        _, frames = self.animationSequencePath
         return bool(frames)
 
 

@@ -168,7 +168,7 @@ class PathResolver(object):
 
     @property
     def animationSequenceExists(self):
-        _, frames = animationSequencePath
+        _, frames = self.animationSequencePath
         return bool(frames)
 
 
@@ -966,9 +966,8 @@ class UploadQueueTable(Form2, Base2):
         episode_name= self.MyTable.item(i, 1).text()
         seq_name= self.MyTable.item(i, 2).text()
         shot_name= self.MyTable.item(i, 3).text()
-        return PathResolver(project_name, episode_name,
-                '_'.join( seq_name.split('_')[1:] ),
-                '_'.join( shot_name.split('_')[1:] ))
+        return PathResolver(project_name, episode_name, '_'.join(
+            seq_name.split('_')[1:] ), '_'.join( shot_name.split('_')[1:] ))
 
     def isWorking(self):
         done, busy, num = self.progress()
